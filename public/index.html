@@ -2,60 +2,64 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Poker Casual Online</title>
+<title>Poker Online</title>
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
+
 body{
   margin:0;
-  background:#0b6623;
+  background:#0e1a2b;
   font-family:Arial;
   color:white;
   text-align:center;
 }
 
-h1{ margin-top:10px; }
+h1{
+  margin:15px;
+}
 
 #table{
-  width:600px;
-  height:600px;
-  background:#145a32;
-  border-radius:50%;
+  width:850px;
+  height:500px;
   margin:20px auto;
+  background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
+  border-radius:250px;
   position:relative;
-  border:8px solid #0a3d1f;
+  border:12px solid #5a3e1b;
 }
 
 .seat{
-  width:120px;
-  height:100px;
-  background:#1e8449;
-  border-radius:15px;
+  width:140px;
+  height:120px;
+  background:#1c1c1c;
+  border-radius:12px;
   position:absolute;
-  text-align:center;
   padding:5px;
   font-size:14px;
-  transition:0.3s;
 }
 
 .turn{
-  box-shadow:0 0 15px yellow;
+  border:2px solid gold;
 }
 
 .card{
   display:inline-block;
-  width:40px;
-  height:60px;
+  width:55px;
+  height:80px;
   background:white;
-  color:black;
-  border-radius:6px;
-  line-height:60px;
+  border-radius:8px;
+  margin:3px;
   font-weight:bold;
-  margin:2px;
+  font-size:20px;
+  line-height:80px;
 }
 
+.red{ color:red; }
+.black{ color:black; }
+
 .hidden{
-  background:black;
+  background:#222;
 }
 
 #community{
@@ -66,26 +70,35 @@ h1{ margin-top:10px; }
 }
 
 #pot{
+  font-size:22px;
+  margin-top:10px;
+}
+
+#winnerText{
   margin-top:10px;
   font-size:20px;
+  color:gold;
+  min-height:30px;
+}
+
+button{
+  padding:8px 15px;
+  margin:5px;
+  font-size:15px;
+  cursor:pointer;
+  border-radius:6px;
+  border:none;
 }
 
 #controls{
   margin-top:20px;
 }
 
-button{
-  padding:8px 15px;
-  margin:5px;
-  font-size:16px;
-  cursor:pointer;
-}
-
 </style>
 </head>
 <body>
 
-<h1>🃏 Poker Casual</h1>
+<h1>♠ Texas Hold'em ♣</h1>
 
 <div id="pot">Pozo: $0</div>
 
@@ -93,111 +106,137 @@ button{
   <div id="community"></div>
 </div>
 
+<div id="winnerText"></div>
+
 <div id="controls">
+  <button onclick="check()">Check</button>
   <button onclick="bet(5)">$5</button>
   <button onclick="bet(10)">$10</button>
   <button onclick="bet(20)">$20</button>
-  <button onclick="allIn()">All-In</button>
   <button onclick="fold()">Fold</button>
 </div>
-
-<h3 id="phase"></h3>
-<h3 id="message"></h3>
 
 <script>
 
 const socket = io();
-let myId = null;
-let currentTurn = null;
+let myId=null;
+let currentTurn=null;
+let revealCards=false;
 
-socket.on("connect", () => {
-  myId = socket.id;
+socket.on("connect",()=>{
+  myId=socket.id;
 });
 
-socket.on("update", data => {
+socket.on("update",data=>{
 
-  currentTurn = data.gameState.turn;
+  currentTurn=data.gameState.turn;
+  revealCards=data.gameState.reveal;
 
-  document.getElementById("pot").innerText =
-    "Pozo: $" + data.gameState.pot;
-
-  document.getElementById("phase").innerText =
-    "Fase: " + data.gameState.phase;
+  document.getElementById("pot").innerText=
+    "Pozo: $"+data.gameState.pot;
 
   renderCommunity(data.gameState.community);
   renderPlayers(data.players);
 });
 
-socket.on("message", msg=>{
-  document.getElementById("message").innerText = msg;
+socket.on("showdown",data=>{
+  document.getElementById("winnerText").innerText=
+    "Ganador: "+getPlayerName(data.winner)+" con "+data.description;
 });
 
+function getPlayerName(id){
+  const seats=document.querySelectorAll(".seat");
+  for(let s of seats){
+    if(s.dataset.id===id) return s.dataset.name;
+  }
+  return "";
+}
+
 function renderCommunity(cards){
-  const div = document.getElementById("community");
+  const div=document.getElementById("community");
   div.innerHTML="";
   cards.forEach(c=>{
-    div.innerHTML += `<div class="card">${c}</div>`;
+    div.appendChild(createCard(c));
   });
+}
+
+function createCard(text){
+  const div=document.createElement("div");
+  div.className="card";
+
+  const suit=text.slice(-1);
+  const value=text.slice(0,-1);
+
+  if(suit==="♥"||suit==="♦")
+    div.classList.add("red");
+  else
+    div.classList.add("black");
+
+  div.innerText=value+suit;
+  return div;
 }
 
 function renderPlayers(players){
 
-  const table = document.getElementById("table");
   document.querySelectorAll(".seat").forEach(e=>e.remove());
 
-  const positions = [
-    {top:"5%",left:"40%"},
+  const positions=[
+    {top:"5%",left:"45%"},
     {top:"20%",left:"80%"},
-    {top:"60%",left:"80%"},
-    {top:"80%",left:"40%"},
-    {top:"60%",left:"0%"},
-    {top:"20%",left:"0%"}
+    {top:"65%",left:"80%"},
+    {top:"80%",left:"45%"},
+    {top:"65%",left:"5%"},
+    {top:"20%",left:"5%"}
   ];
 
   players.forEach((p,index)=>{
 
-    const seat = document.createElement("div");
+    const seat=document.createElement("div");
     seat.className="seat";
+    seat.style.top=positions[index].top;
+    seat.style.left=positions[index].left;
+    seat.dataset.id=p.id;
+    seat.dataset.name=p.name;
 
-    if(p.id === currentTurn){
+    if(p.id===currentTurn)
       seat.classList.add("turn");
-    }
-
-    seat.style.top = positions[index].top;
-    seat.style.left = positions[index].left;
 
     let cardsHtml="";
 
-    if(p.id === myId){
+    if(p.id===myId || revealCards){
       p.cards.forEach(c=>{
-        cardsHtml+= `<div class="card">${c}</div>`;
+        cardsHtml+=createCardHTML(c);
       });
-    }else{
-      if(p.active){
-        cardsHtml+= `
-          <div class="card hidden"></div>
-          <div class="card hidden"></div>
-        `;
-      }
+    }else if(!p.folded){
+      cardsHtml+=`
+        <div class="card hidden"></div>
+        <div class="card hidden"></div>
+      `;
     }
 
-    seat.innerHTML = `
-      <div>${p.name}</div>
+    seat.innerHTML=`
+      <div><b>${p.name}</b></div>
       <div>$${p.money}</div>
-      ${p.id===currentTurn ? "<div style='color:yellow;'>EN TURNO</div>" : ""}
       ${cardsHtml}
     `;
 
-    table.appendChild(seat);
+    document.getElementById("table").appendChild(seat);
   });
 }
 
-function bet(amount){
-  socket.emit("bet", amount);
+function createCardHTML(c){
+  const suit=c.slice(-1);
+  const value=c.slice(0,-1);
+  const color=(suit==="♥"||suit==="♦")?"red":"black";
+  return `<div class="card ${color}">${value}${suit}</div>`;
 }
 
-function allIn(){
-  socket.emit("bet", 9999);
+function bet(amount){
+  socket.emit("bet",amount);
+}
+
+function check(){
+  socket.emit("bet",0);
 }
 
 function fold(){
@@ -207,4 +246,4 @@ function fold(){
 </script>
 
 </body>
-    </html>
+</html>
