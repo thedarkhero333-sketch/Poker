@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Poker Online</title>
+<title>Texas Hold'em Pro</title>
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
@@ -18,35 +18,33 @@ body{
 h1{ margin:15px; }
 
 #table{
-  width:850px;
-  height:500px;
+  width:900px;
+  height:520px;
   margin:20px auto;
   background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
-  border-radius:250px;
+  border-radius:300px;
   position:relative;
-  border:12px solid #5a3e1b;
+  border:14px solid #5a3e1b;
 }
 
 .seat{
-  width:150px;
-  height:140px;
+  width:160px;
+  height:160px;
   background:#1c1c1c;
   border-radius:12px;
   position:absolute;
-  padding:5px;
+  padding:8px;
   font-size:14px;
 }
 
-.turn{
-  border:2px solid gold;
-}
+.turn{ border:2px solid gold; }
 
 .role{
   position:absolute;
-  top:-10px;
-  right:-10px;
-  width:30px;
-  height:30px;
+  top:-12px;
+  right:-12px;
+  width:32px;
+  height:32px;
   border-radius:50%;
   background:gold;
   color:black;
@@ -54,31 +52,31 @@ h1{ margin:15px; }
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:12px;
 }
 
 .card{
   display:inline-block;
-  width:55px;
-  height:80px;
+  width:60px;
+  height:90px;
   background:white;
-  border-radius:8px;
-  margin:3px;
+  border-radius:10px;
+  margin:4px;
   font-weight:bold;
-  font-size:20px;
-  line-height:80px;
+  font-size:22px;
+  line-height:90px;
+  box-shadow:0 0 8px rgba(0,0,0,0.6);
 }
 
 .red{ color:red; }
 .black{ color:black; }
 
 .hidden{
-  background:#222;
+  background:linear-gradient(45deg,#444,#111);
 }
 
 #community{
   position:absolute;
-  top:45%;
+  top:50%;
   left:50%;
   transform:translate(-50%,-50%);
 }
@@ -86,6 +84,12 @@ h1{ margin:15px; }
 #pot{
   font-size:22px;
   margin-top:10px;
+}
+
+#sidepots{
+  font-size:14px;
+  margin-top:5px;
+  color:#00ffcc;
 }
 
 #winnerText{
@@ -108,18 +112,43 @@ button{
   margin-top:20px;
 }
 
+.raiseInput{
+  width:70px;
+  padding:5px;
+}
+
 .betAmount{
   color:#00ffcc;
   font-size:13px;
+}
+
+.allin{
+  color:red;
+  font-weight:bold;
+}
+
+.chip{
+  position:absolute;
+  width:25px;
+  height:25px;
+  background:red;
+  border-radius:50%;
+  animation:fly 0.8s ease forwards;
+}
+
+@keyframes fly{
+  from{transform:translate(0,0);}
+  to{transform:translate(350px,200px);}
 }
 
 </style>
 </head>
 <body>
 
-<h1>♠ Texas Hold'em ♣</h1>
+<h1>♠ Texas Hold'em Pro ♣</h1>
 
 <div id="pot">Pozo: $0</div>
+<div id="sidepots"></div>
 
 <div id="table">
   <div id="community"></div>
@@ -131,46 +160,39 @@ button{
 
 <script>
 
-const socket = io();
+const socket=io();
 let myId=null;
-let currentTurn=null;
-let revealCards=false;
-let currentBet=0;
+let gameState=null;
 let playersGlobal=[];
 
-socket.on("connect",()=>{
-  myId=socket.id;
-});
+socket.on("connect",()=>myId=socket.id);
 
 socket.on("update",data=>{
-
   playersGlobal=data.players;
-  currentTurn=data.gameState.turn;
-  revealCards=data.gameState.reveal;
-  currentBet=data.gameState.currentBet;
+  gameState=data.gameState;
 
   document.getElementById("pot").innerText=
-    "Pozo: $"+data.gameState.pot;
+    "Pozo: $"+gameState.pot;
 
-  renderCommunity(data.gameState.community);
-  renderPlayers(data.players);
+  renderSidePots();
+  renderCommunity();
+  renderPlayers();
   renderControls();
 });
 
-socket.on("showdown",data=>{
-  document.getElementById("winnerText").innerText=
-    "Ganador: "+getPlayerName(data.winner)+" con "+data.description;
-});
-
-function getPlayerName(id){
-  const p=playersGlobal.find(x=>x.id===id);
-  return p? p.name:"";
+function renderSidePots(){
+  const div=document.getElementById("sidepots");
+  div.innerHTML="";
+  if(!gameState.sidePots) return;
+  gameState.sidePots.forEach((p,i)=>{
+    div.innerHTML+=`Side Pot ${i+1}: $${p.amount}<br>`;
+  });
 }
 
-function renderCommunity(cards){
+function renderCommunity(){
   const div=document.getElementById("community");
   div.innerHTML="";
-  cards.forEach(c=>{
+  gameState.community.forEach(c=>{
     div.appendChild(createCard(c));
   });
 }
@@ -178,20 +200,16 @@ function renderCommunity(cards){
 function createCard(text){
   const div=document.createElement("div");
   div.className="card";
-
   const suit=text.slice(-1);
   const value=text.slice(0,-1);
-
-  if(suit==="♥"||suit==="♦")
-    div.classList.add("red");
-  else
-    div.classList.add("black");
-
+  div.classList.add(
+    (suit==="♥"||suit==="♦")?"red":"black"
+  );
   div.innerText=value+suit;
   return div;
 }
 
-function renderPlayers(players){
+function renderPlayers(){
 
   document.querySelectorAll(".seat").forEach(e=>e.remove());
 
@@ -204,21 +222,24 @@ function renderPlayers(players){
     {top:"20%",left:"5%"}
   ];
 
-  players.forEach((p,index)=>{
+  playersGlobal.forEach((p,i)=>{
 
     const seat=document.createElement("div");
     seat.className="seat";
-    seat.style.top=positions[index].top;
-    seat.style.left=positions[index].left;
+    seat.style.top=positions[i].top;
+    seat.style.left=positions[i].left;
 
-    if(p.id===currentTurn)
+    if(gameState.turn===p.id)
       seat.classList.add("turn");
+
+    let roleHtml=p.role?
+      `<div class="role">${p.role}</div>`:"";
 
     let cardsHtml="";
 
-    if(p.id===myId || revealCards){
+    if(p.id===myId || gameState.reveal){
       p.cards.forEach(c=>{
-        cardsHtml+=createCardHTML(c);
+        cardsHtml+=cardHTML(c);
       });
     }else if(!p.folded){
       cardsHtml+=
@@ -226,31 +247,39 @@ function renderPlayers(players){
          <div class="card hidden"></div>`;
     }
 
-    let roleHtml="";
-    if(p.role){
-      roleHtml=`<div class="role">${p.role}</div>`;
-    }
+    let allinHtml=p.allIn?
+      `<div class="allin">ALL-IN</div>`:"";
 
     seat.innerHTML=
       `${roleHtml}
-       <div><b>${p.name}</b></div>
-       <div>$${p.money}</div>
-       <div class="betAmount">Apuesta: $${p.bet||0}</div>
+       <b>${p.name}</b><br>
+       $${p.money}<br>
+       <div class="betAmount">Apuesta: $${p.bet}</div>
+       ${allinHtml}
        ${cardsHtml}`;
 
     document.getElementById("table").appendChild(seat);
+
+    if(p.bet>0) animateChips(seat);
   });
 }
 
-function createCardHTML(c){
+function cardHTML(c){
   const suit=c.slice(-1);
   const value=c.slice(0,-1);
   const color=(suit==="♥"||suit==="♦")?"red":"black";
   return `<div class="card ${color}">${value}${suit}</div>`;
 }
 
+function animateChips(seat){
+  const chip=document.createElement("div");
+  chip.className="chip";
+  seat.appendChild(chip);
+  setTimeout(()=>chip.remove(),800);
+}
+
 /* =========================
-   CONTROLES DINÁMICOS
+   CONTROLES
 ========================= */
 
 function renderControls(){
@@ -260,35 +289,47 @@ function renderControls(){
 
   const me=playersGlobal.find(p=>p.id===myId);
   if(!me) return;
+  if(gameState.turn!==myId) return;
 
-  if(currentTurn!==myId) return;
+  const toCall=gameState.currentBet - me.bet;
 
-  const toCall=currentBet - (me.bet||0);
-
-  // CALL
   if(toCall>0){
-    const callBtn=document.createElement("button");
-    callBtn.innerText="Call $"+toCall;
-    callBtn.onclick=()=>socket.emit("bet",toCall);
-    div.appendChild(callBtn);
+    const call=document.createElement("button");
+    call.innerText="Call $"+toCall;
+    call.onclick=()=>socket.emit("call");
+    div.appendChild(call);
   }
 
-  // CHECK (solo si no hay que igualar)
   if(toCall===0){
-    const checkBtn=document.createElement("button");
-    checkBtn.innerText="Check";
-    checkBtn.onclick=()=>socket.emit("bet",0);
-    div.appendChild(checkBtn);
+    const check=document.createElement("button");
+    check.innerText="Check";
+    check.onclick=()=>socket.emit("check");
+    div.appendChild(check);
   }
 
-  // FOLD
-  const foldBtn=document.createElement("button");
-  foldBtn.innerText="Fold";
-  foldBtn.onclick=()=>socket.emit("fold");
-  div.appendChild(foldBtn);
+  const raiseInput=document.createElement("input");
+  raiseInput.type="number";
+  raiseInput.min="1";
+  raiseInput.className="raiseInput";
+  raiseInput.placeholder="Raise";
+
+  const raiseBtn=document.createElement("button");
+  raiseBtn.innerText="Raise";
+  raiseBtn.onclick=()=>{
+    const val=parseInt(raiseInput.value);
+    if(val>0)
+      socket.emit("raise",val);
+  };
+
+  const fold=document.createElement("button");
+  fold.innerText="Fold";
+  fold.onclick=()=>socket.emit("fold");
+
+  div.appendChild(raiseInput);
+  div.appendChild(raiseBtn);
+  div.appendChild(fold);
 }
 
 </script>
-
 </body>
 </html>
