@@ -9,122 +9,72 @@
 
 body{
   margin:0;
-  background:#0b1522;
-  font-family:Arial, Helvetica, sans-serif;
+  background:#0e1a2b;
+  font-family:Arial;
   color:white;
   text-align:center;
 }
 
-h1{
-  margin:15px;
-}
-
-#pot{
-  font-size:22px;
-  margin-top:5px;
-}
-
-#winnerText{
-  height:30px;
-  margin-top:10px;
-  font-size:20px;
-  color:gold;
-}
+h1{ margin:15px; }
 
 #table{
-  width:900px;
-  height:520px;
+  width:850px;
+  height:500px;
   margin:20px auto;
-  background:radial-gradient(circle at center,#1f7a3d 0%,#125b2b 70%);
-  border-radius:300px;
+  background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
+  border-radius:250px;
   position:relative;
-  border:14px solid #5a3e1b;
-  box-shadow:0 0 40px rgba(0,0,0,0.6);
+  border:12px solid #5a3e1b;
 }
 
-/* ASIENTOS */
-
 .seat{
-  width:170px;
-  height:150px;
-  background:#1b1b1b;
-  border-radius:14px;
+  width:150px;
+  height:140px;
+  background:#1c1c1c;
+  border-radius:12px;
   position:absolute;
-  padding:8px;
+  padding:5px;
   font-size:14px;
-  box-shadow:0 0 10px rgba(0,0,0,0.7);
 }
 
 .turn{
-  box-shadow:0 0 15px gold;
+  border:2px solid gold;
 }
-
-/* ROLES */
 
 .role{
   position:absolute;
   top:-10px;
   right:-10px;
-  width:28px;
-  height:28px;
+  width:30px;
+  height:30px;
   border-radius:50%;
-  font-size:13px;
-  line-height:28px;
-  font-weight:bold;
+  background:gold;
   color:black;
+  font-weight:bold;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
 }
-
-.dealer{ background:gold; }
-.sb{ background:#3fa9f5; color:white; }
-.bb{ background:#ff4d4d; color:white; }
-
-/* CARTAS */
 
 .card{
   display:inline-block;
-  width:65px;
-  height:95px;
+  width:55px;
+  height:80px;
   background:white;
-  border-radius:10px;
-  margin:4px;
-  position:relative;
-  border:1px solid #aaa;
-  box-shadow:0 3px 6px rgba(0,0,0,0.4);
+  border-radius:8px;
+  margin:3px;
   font-weight:bold;
+  font-size:20px;
+  line-height:80px;
 }
 
-.card .top{
-  position:absolute;
-  top:5px;
-  left:6px;
-  font-size:15px;
-}
-
-.card .bottom{
-  position:absolute;
-  bottom:5px;
-  right:6px;
-  font-size:15px;
-  transform:rotate(180deg);
-}
-
-.card .center{
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  font-size:28px;
-}
-
-.red{ color:#d60000; }
-.black{ color:#000; }
+.red{ color:red; }
+.black{ color:black; }
 
 .hidden{
-  background:linear-gradient(45deg,#1e3c72,#2a5298);
-  border:1px solid #222;
+  background:#222;
 }
-
-/* COMUNITARIAS */
 
 #community{
   position:absolute;
@@ -133,34 +83,34 @@ h1{
   transform:translate(-50%,-50%);
 }
 
-/* CONTROLES */
+#pot{
+  font-size:22px;
+  margin-top:10px;
+}
 
-#controls{
-  margin-top:15px;
+#winnerText{
+  margin-top:10px;
+  font-size:20px;
+  color:gold;
+  min-height:30px;
 }
 
 button{
-  padding:10px 18px;
-  margin:6px;
+  padding:8px 15px;
+  margin:5px;
   font-size:15px;
   cursor:pointer;
-  border-radius:8px;
+  border-radius:6px;
   border:none;
-  background:#444;
-  color:white;
-  transition:0.2s;
 }
 
-button:hover{
-  background:#666;
+#controls{
+  margin-top:20px;
 }
 
-button.primary{
-  background:#3fa9f5;
-}
-
-button.danger{
-  background:#ff4d4d;
+.betAmount{
+  color:#00ffcc;
+  font-size:13px;
 }
 
 </style>
@@ -170,79 +120,78 @@ button.danger{
 <h1>♠ Texas Hold'em ♣</h1>
 
 <div id="pot">Pozo: $0</div>
-<div id="winnerText"></div>
 
 <div id="table">
   <div id="community"></div>
 </div>
 
-<div id="controls">
-  <button onclick="check()">Check</button>
-  <button class="primary" onclick="bet(5)">Min ($5)</button>
-  <button class="primary" onclick="bet(10)">Max ($10)</button>
-  <button class="danger" onclick="fold()">Fold</button>
-</div>
+<div id="winnerText"></div>
+
+<div id="controls"></div>
 
 <script>
 
 const socket = io();
-let myId = null;
-let currentTurn = null;
-let revealCards = false;
+let myId=null;
+let currentTurn=null;
+let revealCards=false;
+let currentBet=0;
+let playersGlobal=[];
 
 socket.on("connect",()=>{
-  myId = socket.id;
+  myId=socket.id;
 });
 
 socket.on("update",data=>{
 
-  currentTurn = data.gameState.turn;
-  revealCards = data.gameState.reveal;
+  playersGlobal=data.players;
+  currentTurn=data.gameState.turn;
+  revealCards=data.gameState.reveal;
+  currentBet=data.gameState.currentBet;
 
-  document.getElementById("pot").innerText =
-    "Pozo: $" + data.gameState.pot;
+  document.getElementById("pot").innerText=
+    "Pozo: $"+data.gameState.pot;
 
   renderCommunity(data.gameState.community);
-  renderPlayers(data.players,data.gameState);
+  renderPlayers(data.players);
+  renderControls();
 });
 
 socket.on("showdown",data=>{
-  document.getElementById("winnerText").innerText =
-    "Ganador: " + getPlayerName(data.winner) +
-    " con " + data.description;
+  document.getElementById("winnerText").innerText=
+    "Ganador: "+getPlayerName(data.winner)+" con "+data.description;
 });
 
 function getPlayerName(id){
-  const seats=document.querySelectorAll(".seat");
-  for(let s of seats){
-    if(s.dataset.id===id) return s.dataset.name;
-  }
-  return "";
+  const p=playersGlobal.find(x=>x.id===id);
+  return p? p.name:"";
 }
 
 function renderCommunity(cards){
   const div=document.getElementById("community");
   div.innerHTML="";
-  cards.forEach(c=>div.appendChild(createCard(c)));
+  cards.forEach(c=>{
+    div.appendChild(createCard(c));
+  });
 }
 
 function createCard(text){
+  const div=document.createElement("div");
+  div.className="card";
+
   const suit=text.slice(-1);
   const value=text.slice(0,-1);
-  const color=(suit==="♥"||suit==="♦")?"red":"black";
 
-  const div=document.createElement("div");
-  div.className="card "+color;
+  if(suit==="♥"||suit==="♦")
+    div.classList.add("red");
+  else
+    div.classList.add("black");
 
-  div.innerHTML=`
-    <div class="top">${value}${suit}</div>
-    <div class="center">${suit}</div>
-    <div class="bottom">${value}${suit}</div>
-  `;
+  div.innerText=value+suit;
   return div;
 }
 
-function renderPlayers(players,gameState){
+function renderPlayers(players){
 
   document.querySelectorAll(".seat").forEach(e=>e.remove());
 
@@ -261,49 +210,82 @@ function renderPlayers(players,gameState){
     seat.className="seat";
     seat.style.top=positions[index].top;
     seat.style.left=positions[index].left;
-    seat.dataset.id=p.id;
-    seat.dataset.name=p.name;
 
     if(p.id===currentTurn)
       seat.classList.add("turn");
 
-    /* ROLES */
-    if(index===gameState.dealerIndex){
-      seat.innerHTML+=`<div class="role dealer">D</div>`;
-    }
-    if(index===gameState.sbIndex){
-      seat.innerHTML+=`<div class="role sb">SB</div>`;
-    }
-    if(index===gameState.bbIndex){
-      seat.innerHTML+=`<div class="role bb">BB</div>`;
-    }
-
-    seat.innerHTML+=`<div><b>${p.name}</b></div>`;
-    seat.innerHTML+=`<div>$${p.money}</div>`;
+    let cardsHtml="";
 
     if(p.id===myId || revealCards){
-      p.cards.forEach(c=>seat.appendChild(createCard(c)));
+      p.cards.forEach(c=>{
+        cardsHtml+=createCardHTML(c);
+      });
     }else if(!p.folded){
-      seat.innerHTML+=`
-        <div class="card hidden"></div>
-        <div class="card hidden"></div>
-      `;
+      cardsHtml+=
+        `<div class="card hidden"></div>
+         <div class="card hidden"></div>`;
     }
+
+    let roleHtml="";
+    if(p.role){
+      roleHtml=`<div class="role">${p.role}</div>`;
+    }
+
+    seat.innerHTML=
+      `${roleHtml}
+       <div><b>${p.name}</b></div>
+       <div>$${p.money}</div>
+       <div class="betAmount">Apuesta: $${p.bet||0}</div>
+       ${cardsHtml}`;
 
     document.getElementById("table").appendChild(seat);
   });
 }
 
-function bet(amount){
-  socket.emit("bet",amount);
+function createCardHTML(c){
+  const suit=c.slice(-1);
+  const value=c.slice(0,-1);
+  const color=(suit==="♥"||suit==="♦")?"red":"black";
+  return `<div class="card ${color}">${value}${suit}</div>`;
 }
 
-function check(){
-  socket.emit("bet",0);
-}
+/* =========================
+   CONTROLES DINÁMICOS
+========================= */
 
-function fold(){
-  socket.emit("fold");
+function renderControls(){
+
+  const div=document.getElementById("controls");
+  div.innerHTML="";
+
+  const me=playersGlobal.find(p=>p.id===myId);
+  if(!me) return;
+
+  if(currentTurn!==myId) return;
+
+  const toCall=currentBet - (me.bet||0);
+
+  // CALL
+  if(toCall>0){
+    const callBtn=document.createElement("button");
+    callBtn.innerText="Call $"+toCall;
+    callBtn.onclick=()=>socket.emit("bet",toCall);
+    div.appendChild(callBtn);
+  }
+
+  // CHECK (solo si no hay que igualar)
+  if(toCall===0){
+    const checkBtn=document.createElement("button");
+    checkBtn.innerText="Check";
+    checkBtn.onclick=()=>socket.emit("bet",0);
+    div.appendChild(checkBtn);
+  }
+
+  // FOLD
+  const foldBtn=document.createElement("button");
+  foldBtn.innerText="Fold";
+  foldBtn.onclick=()=>socket.emit("fold");
+  div.appendChild(foldBtn);
 }
 
 </script>
