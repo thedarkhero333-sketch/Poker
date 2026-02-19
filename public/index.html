@@ -15,9 +15,7 @@ body{
   text-align:center;
 }
 
-h1{
-  margin:15px;
-}
+h1{ margin:15px; }
 
 #table{
   width:850px;
@@ -30,8 +28,8 @@ h1{
 }
 
 .seat{
-  width:140px;
-  height:120px;
+  width:160px;
+  height:150px;
   background:#1c1c1c;
   border-radius:12px;
   position:absolute;
@@ -40,7 +38,17 @@ h1{
 }
 
 .turn{
-  border:2px solid gold;
+  border:3px solid gold;
+}
+
+.role{
+  font-size:12px;
+  color:gold;
+}
+
+.betAmount{
+  font-size:13px;
+  color:#00ff99;
 }
 
 .card{
@@ -109,19 +117,20 @@ button{
 <div id="winnerText"></div>
 
 <div id="controls">
-  <button onclick="check()">Check</button>
-  <button onclick="bet(5)">$5</button>
-  <button onclick="bet(10)">$10</button>
-  <button onclick="bet(20)">$20</button>
+  <button id="callBtn" onclick="call()">Call</button>
+  <button id="checkBtn" onclick="check()">Check</button>
   <button onclick="fold()">Fold</button>
 </div>
 
 <script>
 
 const socket = io();
+
 let myId=null;
 let currentTurn=null;
 let revealCards=false;
+let currentBet=0;
+let myBet=0;
 
 socket.on("connect",()=>{
   myId=socket.id;
@@ -131,12 +140,14 @@ socket.on("update",data=>{
 
   currentTurn=data.gameState.turn;
   revealCards=data.gameState.reveal;
+  currentBet=data.gameState.currentBet;
 
   document.getElementById("pot").innerText=
     "Pozo: $"+data.gameState.pot;
 
   renderCommunity(data.gameState.community);
   renderPlayers(data.players);
+  updateControls(data.players);
 });
 
 socket.on("showdown",data=>{
@@ -163,15 +174,12 @@ function renderCommunity(cards){
 function createCard(text){
   const div=document.createElement("div");
   div.className="card";
-
   const suit=text.slice(-1);
   const value=text.slice(0,-1);
-
   if(suit==="♥"||suit==="♦")
     div.classList.add("red");
   else
     div.classList.add("black");
-
   div.innerText=value+suit;
   return div;
 }
@@ -201,6 +209,9 @@ function renderPlayers(players){
     if(p.id===currentTurn)
       seat.classList.add("turn");
 
+    if(p.id===myId)
+      myBet=p.bet;
+
     let cardsHtml="";
 
     if(p.id===myId || revealCards){
@@ -217,6 +228,8 @@ function renderPlayers(players){
     seat.innerHTML=`
       <div><b>${p.name}</b></div>
       <div>$${p.money}</div>
+      <div class="role">${p.role || ""}</div>
+      <div class="betAmount">Apuesta: $${p.bet}</div>
       ${cardsHtml}
     `;
 
@@ -231,12 +244,38 @@ function createCardHTML(c){
   return `<div class="card ${color}">${value}${suit}</div>`;
 }
 
-function bet(amount){
-  socket.emit("bet",amount);
+function updateControls(players){
+
+  const callBtn=document.getElementById("callBtn");
+  const checkBtn=document.getElementById("checkBtn");
+
+  const myPlayer=players.find(p=>p.id===myId);
+  if(!myPlayer) return;
+
+  const toCall=currentBet - myPlayer.bet;
+
+  if(currentTurn!==myId){
+    callBtn.disabled=true;
+    checkBtn.disabled=true;
+    return;
+  }
+
+  if(toCall>0){
+    callBtn.innerText="Call $"+toCall;
+    callBtn.disabled=false;
+    checkBtn.disabled=true;
+  }else{
+    callBtn.disabled=true;
+    checkBtn.disabled=false;
+  }
+}
+
+function call(){
+  socket.emit("call");
 }
 
 function check(){
-  socket.emit("bet",0);
+  socket.emit("check");
 }
 
 function fold(){
