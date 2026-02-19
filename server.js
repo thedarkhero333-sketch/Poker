@@ -32,7 +32,6 @@ let gameState = {
 
 io.on("connection", socket => {
 
-  if (players.find(p => p.id === socket.id)) return;
   if (players.length >= 6) return;
 
   const player = {
@@ -47,13 +46,12 @@ io.on("connection", socket => {
 
   players.push(player);
 
-  if (players.length >= 2 && !gameRunning) {
+  if (players.length >= 2 && !gameRunning)
     startGame();
-  }
 
   io.emit("update", { players, gameState });
 
-  socket.on("call", () => {
+  socket.on("bet", amount => {
 
     if (!gameRunning) return;
     if (gameState.turn !== socket.id) return;
@@ -61,49 +59,39 @@ io.on("connection", socket => {
     const p = players.find(x => x.id === socket.id);
     if (!p || p.folded) return;
 
-    const toCall = gameState.currentBet - p.bet;
-    if (toCall <= 0) return;
+    amount = Number(amount);
 
-    const amount = Math.min(toCall, p.money);
+    const toCall = gameState.currentBet - p.bet;
+
+    if (amount < toCall) return; // no puede apostar menos que igualar
+
+    if (amount > p.money) amount = p.money;
 
     p.money -= amount;
     p.bet += amount;
 
-    nextTurn();
-  });
-
-  socket.on("check", () => {
-
-    if (gameState.turn !== socket.id) return;
-
-    const p = players.find(x => x.id === socket.id);
-    if (!p) return;
-
-    if (p.bet !== gameState.currentBet) return;
+    if (p.bet > gameState.currentBet)
+      gameState.currentBet = p.bet;
 
     nextTurn();
   });
 
   socket.on("fold", () => {
-
     const p = players.find(x => x.id === socket.id);
     if (!p) return;
-
     p.folded = true;
     nextTurn();
   });
 
   socket.on("disconnect", () => {
-
     players = players.filter(p => p.id !== socket.id);
-
     if (players.length < 2) {
       gameRunning = false;
       gameState.turn = null;
     }
-
     io.emit("update", { players, gameState });
   });
+
 });
 
 /* =========================
@@ -112,16 +100,18 @@ io.on("connection", socket => {
 
 function startGame() {
 
+  if (players.length < 2) return;
+
   gameRunning = true;
 
-  deck = createDeck();
-  shuffle(deck);
-
-  gameState.community = [];
   gameState.pot = 0;
+  gameState.community = [];
   gameState.stage = 0;
   gameState.reveal = false;
   gameState.currentBet = BIG_BLIND;
+
+  deck = createDeck();
+  shuffle(deck);
 
   players.forEach(p => {
     p.cards = [deck.pop(), deck.pop()];
@@ -133,6 +123,7 @@ function startGame() {
   assignRoles();
   applyBlinds();
 
+  // empieza el jugador después de BB
   const bbIndex = players.findIndex(p => p.role === "BB");
   const first = (bbIndex + 1) % players.length;
   gameState.turn = players[first].id;
@@ -141,7 +132,7 @@ function startGame() {
 }
 
 /* =========================
-   ROLES
+   ROLES (ROTATIVOS)
 ========================= */
 
 function assignRoles() {
@@ -152,9 +143,14 @@ function assignRoles() {
   const sb = (dealer + 1) % players.length;
   const bb = (dealer + 2) % players.length;
 
-  players[dealer].role = "D";
-  players[sb].role = "SB";
-  players[bb].role = "BB";
+  if (players.length === 2) {
+    players[dealer].role = "SB";
+    players[sb].role = "BB";
+  } else {
+    players[dealer].role = "D";
+    players[sb].role = "SB";
+    players[bb].role = "BB";
+  }
 }
 
 function applyBlinds() {
@@ -181,15 +177,13 @@ function nextTurn() {
 
   const active = players.filter(p => !p.folded);
 
-  if (active.length === 1) {
+  if (active.length === 1)
     return endRound();
-  }
 
   const allMatched = active.every(p => p.bet === gameState.currentBet);
 
-  if (allMatched) {
+  if (allMatched)
     return advanceStage();
-  }
 
   let currentIndex = players.findIndex(p => p.id === gameState.turn);
 
@@ -208,6 +202,7 @@ function nextTurn() {
 
 function advanceStage() {
 
+  // sumar apuestas al pozo recién ahora
   players.forEach(p => {
     gameState.pot += p.bet;
     p.bet = 0;
@@ -240,7 +235,6 @@ function endRound() {
 
   const active = players.filter(p => !p.folded);
   let winner;
-  let bestResult;
 
   if (active.length === 1) {
     winner = active[0];
@@ -251,23 +245,23 @@ function endRound() {
       result: evaluateHand([...p.cards, ...gameState.community])
     }));
 
-    results.sort((a, b) => compareHands(b.result, a.result));
+    results.sort((a,b)=>compareHands(b.result,a.result));
 
     winner = results[0].player;
-    bestResult = results[0].result;
 
     io.emit("showdown", {
       winner: winner.id,
-      description: bestResult.name
+      description: results[0].result.name
     });
   }
 
   winner.money += gameState.pot;
+
   gameState.reveal = true;
 
   io.emit("update", { players, gameState });
 
-  dealerIndex++;
+  dealerIndex++; // 🔥 rota dealer
 
   setTimeout(resetRound, 5000);
 }
@@ -294,7 +288,7 @@ function resetRound() {
 }
 
 /* =========================
-   CARTAS + EVALUADOR REAL
+   CARTAS
 ========================= */
 
 function createDeck(){
@@ -312,104 +306,4 @@ function shuffle(array){
     const j=Math.floor(Math.random()*(i+1));
     [array[i],array[j]]=[array[j],array[i]];
   }
-}
-
-function evaluateHand(cards){
-
-  const valueMap = {
-    "2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
-    "T":10,"J":11,"Q":12,"K":13,"A":14
-  };
-
-  const values = cards.map(c => valueMap[c[0]]);
-  const suits = cards.map(c => c[1]);
-
-  const counts = {};
-  values.forEach(v => counts[v] = (counts[v] || 0) + 1);
-
-  const uniqueVals = [...new Set(values)].sort((a,b)=>b-a);
-  const sortedVals = values.slice().sort((a,b)=>b-a);
-
-  const isFlush = suits.some(s =>
-    suits.filter(x=>x===s).length >=5
-  );
-
-  const sortedAsc = [...new Set(values)].sort((a,b)=>a-b);
-
-  let isStraight = false;
-  let straightHigh = 0;
-
-  for(let i=0;i<sortedAsc.length-4;i++){
-    if(
-      sortedAsc[i]+1===sortedAsc[i+1] &&
-      sortedAsc[i]+2===sortedAsc[i+2] &&
-      sortedAsc[i]+3===sortedAsc[i+3] &&
-      sortedAsc[i]+4===sortedAsc[i+4]
-    ){
-      isStraight = true;
-      straightHigh = sortedAsc[i+4];
-    }
-  }
-
-  if(sortedAsc.includes(14) &&
-     sortedAsc.includes(2) &&
-     sortedAsc.includes(3) &&
-     sortedAsc.includes(4) &&
-     sortedAsc.includes(5)){
-    isStraight = true;
-    straightHigh = 5;
-  }
-
-  const pairs = [];
-  const trips = [];
-  const quads = [];
-
-  for(let v in counts){
-    if(counts[v]===2) pairs.push(+v);
-    if(counts[v]===3) trips.push(+v);
-    if(counts[v]===4) quads.push(+v);
-  }
-
-  pairs.sort((a,b)=>b-a);
-  trips.sort((a,b)=>b-a);
-  quads.sort((a,b)=>b-a);
-
-  if(isStraight && isFlush)
-    return {rank:8, values:[straightHigh], name:"Escalera de Color"};
-
-  if(quads.length)
-    return {rank:7, values:[quads[0]], name:"Poker"};
-
-  if(trips.length && pairs.length)
-    return {rank:6, values:[trips[0]], name:"Full House"};
-
-  if(isFlush)
-    return {rank:5, values:sortedVals, name:"Color"};
-
-  if(isStraight)
-    return {rank:4, values:[straightHigh], name:"Escalera"};
-
-  if(trips.length)
-    return {rank:3, values:[trips[0]], name:"Trio"};
-
-  if(pairs.length>=2)
-    return {rank:2, values:[pairs[0],pairs[1]], name:"Doble Par"};
-
-  if(pairs.length)
-    return {rank:1, values:[pairs[0]], name:"Par"};
-
-  return {rank:0, values:sortedVals, name:"Carta Alta"};
-}
-
-function compareHands(a,b){
-
-  if(a.rank !== b.rank)
-    return a.rank - b.rank;
-
-  for(let i=0;i<Math.max(a.values.length,b.values.length);i++){
-    const diff = (a.values[i]||0) - (b.values[i]||0);
-    if(diff !== 0) return diff;
-  }
-
-  return 0;
 }
