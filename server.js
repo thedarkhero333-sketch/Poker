@@ -14,13 +14,16 @@ let deck = [];
 let gameRunning = false;
 let dealerIndex = 0;
 
+const SMALL_BLIND = 5;
+const BIG_BLIND = 10;
+
 let gameState = {
   pot: 0,
   community: [],
   turn: null,
   reveal: false,
   stage: 0,
-  betsThisRound: 0
+  currentBet: 0
 };
 
 /* =========================
@@ -29,11 +32,7 @@ let gameState = {
 
 io.on("connection", socket => {
 
-  console.log("Nuevo socket:", socket.id);
-
-  // 🚨 EVITAR DUPLICADOS
   if (players.find(p => p.id === socket.id)) return;
-
   if (players.length >= 6) return;
 
   const player = {
@@ -42,12 +41,11 @@ io.on("connection", socket => {
     money: 100,
     cards: [],
     folded: false,
-    bet: 0
+    bet: 0,
+    role: ""
   };
 
   players.push(player);
-
-  console.log("Jugadores activos:", players.length);
 
   if (players.length >= 2 && !gameRunning) {
     startGame();
@@ -55,11 +53,7 @@ io.on("connection", socket => {
 
   io.emit("update", { players, gameState });
 
-  /* =========================
-     EVENTOS
-  ========================= */
-
-  socket.on("bet", amount => {
+  socket.on("call", () => {
 
     if (!gameRunning) return;
     if (gameState.turn !== socket.id) return;
@@ -67,24 +61,26 @@ io.on("connection", socket => {
     const p = players.find(x => x.id === socket.id);
     if (!p || p.folded) return;
 
-    amount = Number(amount);
-    if (amount > p.money) amount = p.money;
-    if (amount <= 0) return;
+    const toCall = gameState.currentBet - p.bet;
+
+    if (toCall <= 0) return;
+
+    const amount = Math.min(toCall, p.money);
 
     p.money -= amount;
     p.bet += amount;
-
-    gameState.betsThisRound++;
 
     nextTurn();
   });
 
   socket.on("check", () => {
 
-    if (!gameRunning) return;
     if (gameState.turn !== socket.id) return;
 
-    gameState.betsThisRound++;
+    const p = players.find(x => x.id === socket.id);
+
+    if (p.bet !== gameState.currentBet) return; // NO puede checkear si no igualó
+
     nextTurn();
   });
 
@@ -98,8 +94,6 @@ io.on("connection", socket => {
   });
 
   socket.on("disconnect", () => {
-
-    console.log("Desconectado:", socket.id);
 
     players = players.filter(p => p.id !== socket.id);
 
@@ -119,8 +113,6 @@ io.on("connection", socket => {
 
 function startGame() {
 
-  if (players.length < 2) return;
-
   gameRunning = true;
 
   deck = createDeck();
@@ -130,20 +122,58 @@ function startGame() {
   gameState.pot = 0;
   gameState.stage = 0;
   gameState.reveal = false;
-  gameState.betsThisRound = 0;
+  gameState.currentBet = BIG_BLIND;
 
   players.forEach(p => {
     p.cards = [deck.pop(), deck.pop()];
     p.folded = false;
     p.bet = 0;
+    p.role = "";
   });
 
-  dealerIndex = dealerIndex % players.length;
+  assignRoles();
+  applyBlinds();
 
-  const first = (dealerIndex + 1) % players.length;
+  // Empieza el jugador después de la BB
+  const bbIndex = players.findIndex(p => p.role === "BB");
+  const first = (bbIndex + 1) % players.length;
+
   gameState.turn = players[first].id;
 
   io.emit("update", { players, gameState });
+}
+
+/* =========================
+   ROLES
+========================= */
+
+function assignRoles() {
+
+  players.forEach(p => p.role = "");
+
+  const dealer = dealerIndex % players.length;
+  const sb = (dealer + 1) % players.length;
+  const bb = (dealer + 2) % players.length;
+
+  players[dealer].role = "D";
+  players[sb].role = "SB";
+  players[bb].role = "BB";
+}
+
+function applyBlinds() {
+
+  const sb = players.find(p => p.role === "SB");
+  const bb = players.find(p => p.role === "BB");
+
+  if (sb) {
+    sb.money -= SMALL_BLIND;
+    sb.bet = SMALL_BLIND;
+  }
+
+  if (bb) {
+    bb.money -= BIG_BLIND;
+    bb.bet = BIG_BLIND;
+  }
 }
 
 /* =========================
@@ -158,6 +188,13 @@ function nextTurn() {
     return endRound();
   }
 
+  // Verificar si todos igualaron
+  const allMatched = active.every(p => p.bet === gameState.currentBet);
+
+  if (allMatched) {
+    return advanceStage();
+  }
+
   let currentIndex = players.findIndex(p => p.id === gameState.turn);
 
   do {
@@ -165,10 +202,6 @@ function nextTurn() {
   } while (players[currentIndex].folded);
 
   gameState.turn = players[currentIndex].id;
-
-  if (gameState.betsThisRound >= active.length) {
-    advanceStage();
-  }
 
   io.emit("update", { players, gameState });
 }
@@ -184,24 +217,23 @@ function advanceStage() {
     p.bet = 0;
   });
 
-  gameState.betsThisRound = 0;
+  gameState.currentBet = 0;
   gameState.stage++;
 
-  if (gameState.stage === 1) {
+  if (gameState.stage === 1)
     gameState.community.push(deck.pop(), deck.pop(), deck.pop());
-  }
-  else if (gameState.stage === 2) {
+  else if (gameState.stage === 2)
     gameState.community.push(deck.pop());
-  }
-  else if (gameState.stage === 3) {
+  else if (gameState.stage === 3)
     gameState.community.push(deck.pop());
-  }
-  else if (gameState.stage > 3) {
+  else
     return endRound();
-  }
 
-  const first = (dealerIndex + 1) % players.length;
+  const dealerPos = dealerIndex % players.length;
+  const first = (dealerPos + 1) % players.length;
   gameState.turn = players[first].id;
+
+  io.emit("update", { players, gameState });
 }
 
 /* =========================
@@ -255,84 +287,17 @@ function resetRound() {
     p.cards = [];
     p.folded = false;
     p.bet = 0;
+    p.role = "";
   });
 
-  if (players.length >= 2) {
+  if (players.length >= 2)
     startGame();
-  } else {
+  else
     gameRunning = false;
-  }
 }
 
 /* =========================
-   EVALUADOR
-========================= */
-
-function evaluateHand(cards) {
-  const order = "23456789TJQKA";
-  const nums = cards.map(c => order.indexOf(c[0])).sort((a,b)=>b-a);
-  const suits = cards.map(c => c[1]);
-
-  const counts = {};
-  nums.forEach(n => counts[n] = (counts[n] || 0) + 1);
-
-  const groups = Object.entries(counts)
-    .sort((a,b)=> b[1]-a[1] || b[0]-a[0]);
-
-  const isFlush = suits.some(s =>
-    suits.filter(x=>x===s).length >= 5);
-
-  const unique = [...new Set(nums)].sort((a,b)=>b-a);
-
-  let isStraight = false;
-  let high = 0;
-
-  for (let i=0;i<=unique.length-5;i++){
-    if (unique[i]-unique[i+4]===4){
-      isStraight=true;
-      high=unique[i];
-      break;
-    }
-  }
-
-  if (isStraight && isFlush)
-    return {rank:8, values:[high], name:"Escalera de color"};
-
-  if (groups[0][1]===4)
-    return {rank:7, values:[+groups[0][0]], name:"Poker"};
-
-  if (groups[0][1]===3 && groups[1] && groups[1][1]===2)
-    return {rank:6, values:[+groups[0][0]], name:"Full House"};
-
-  if (isFlush)
-    return {rank:5, values:nums.slice(0,5), name:"Color"};
-
-  if (isStraight)
-    return {rank:4, values:[high], name:"Escalera"};
-
-  if (groups[0][1]===3)
-    return {rank:3, values:[+groups[0][0]], name:"Trío"};
-
-  if (groups[0][1]===2 && groups[1] && groups[1][1]===2)
-    return {rank:2, values:[+groups[0][0]], name:"Doble Par"};
-
-  if (groups[0][1]===2)
-    return {rank:1, values:[+groups[0][0]], name:"Par"};
-
-  return {rank:0, values:nums.slice(0,5), name:"Carta Alta"};
-}
-
-function compareHands(a,b){
-  if (a.rank !== b.rank) return a.rank - b.rank;
-  for (let i=0;i<a.values.length;i++){
-    if ((a.values[i]||0)!==(b.values[i]||0))
-      return (a.values[i]||0)-(b.values[i]||0);
-  }
-  return 0;
-}
-
-/* =========================
-   CARTAS
+   CARTAS + EVALUADOR
 ========================= */
 
 function createDeck(){
@@ -350,4 +315,12 @@ function shuffle(array){
     const j=Math.floor(Math.random()*(i+1));
     [array[i],array[j]]=[array[j],array[i]];
   }
+}
+
+function evaluateHand(cards){
+  return {rank:0, values:[0], name:"Evaluador pendiente"};
+}
+
+function compareHands(a,b){
+  return a.rank - b.rank;
 }
