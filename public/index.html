@@ -2,67 +2,209 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Texas Hold'em</title>
+<title>Poker Casual Online</title>
+<script src="/socket.io/socket.io.js"></script>
+
 <style>
-body { background:#0b6623; color:white; text-align:center; font-family:Arial; }
-.card { display:inline-block; padding:10px; margin:5px; background:white; color:black; border-radius:8px; width:50px; }
+body{
+  margin:0;
+  background:#0b6623;
+  font-family:Arial;
+  color:white;
+  text-align:center;
+}
+
+h1{ margin-top:10px; }
+
+#table{
+  width:600px;
+  height:600px;
+  background:#145a32;
+  border-radius:50%;
+  margin:20px auto;
+  position:relative;
+  border:8px solid #0a3d1f;
+}
+
+.seat{
+  width:120px;
+  height:100px;
+  background:#1e8449;
+  border-radius:15px;
+  position:absolute;
+  text-align:center;
+  padding:5px;
+  font-size:14px;
+  transition:0.3s;
+}
+
+.turn{
+  box-shadow:0 0 15px yellow;
+}
+
+.card{
+  display:inline-block;
+  width:40px;
+  height:60px;
+  background:white;
+  color:black;
+  border-radius:6px;
+  line-height:60px;
+  font-weight:bold;
+  margin:2px;
+}
+
+.hidden{
+  background:black;
+}
+
+#community{
+  position:absolute;
+  top:45%;
+  left:50%;
+  transform:translate(-50%,-50%);
+}
+
+#pot{
+  margin-top:10px;
+  font-size:20px;
+}
+
+#controls{
+  margin-top:20px;
+}
+
+button{
+  padding:8px 15px;
+  margin:5px;
+  font-size:16px;
+  cursor:pointer;
+}
+
 </style>
 </head>
 <body>
 
-<h1>🃏 Texas Hold'em Online</h1>
+<h1>🃏 Poker Casual</h1>
 
-<h2 id="status">Conectando...</h2>
-<h3 id="countdown"></h3>
+<div id="pot">Pozo: $0</div>
 
-<h2>Cartas Comunitarias</h2>
-<div id="community"></div>
+<div id="table">
+  <div id="community"></div>
+</div>
 
-<h2>Tu Mano</h2>
-<div id="player"></div>
+<div id="controls">
+  <button onclick="bet(5)">$5</button>
+  <button onclick="bet(10)">$10</button>
+  <button onclick="bet(20)">$20</button>
+  <button onclick="allIn()">All-In</button>
+  <button onclick="fold()">Fold</button>
+</div>
 
-<h2 id="result"></h2>
+<h3 id="phase"></h3>
+<h3 id="message"></h3>
 
-<script src="/socket.io/socket.io.js"></script>
 <script>
+
 const socket = io();
+let myId = null;
+let currentTurn = null;
 
-socket.on("players", count => {
-    if (count < 2) {
-        document.getElementById("status").innerText = 
-        "Esperando jugador...";
-    } else {
-        document.getElementById("status").innerText = 
-        "Jugador encontrado!";
+socket.on("connect", () => {
+  myId = socket.id;
+});
+
+socket.on("update", data => {
+
+  currentTurn = data.gameState.turn;
+
+  document.getElementById("pot").innerText =
+    "Pozo: $" + data.gameState.pot;
+
+  document.getElementById("phase").innerText =
+    "Fase: " + data.gameState.phase;
+
+  renderCommunity(data.gameState.community);
+  renderPlayers(data.players);
+});
+
+socket.on("message", msg=>{
+  document.getElementById("message").innerText = msg;
+});
+
+function renderCommunity(cards){
+  const div = document.getElementById("community");
+  div.innerHTML="";
+  cards.forEach(c=>{
+    div.innerHTML += `<div class="card">${c}</div>`;
+  });
+}
+
+function renderPlayers(players){
+
+  const table = document.getElementById("table");
+  document.querySelectorAll(".seat").forEach(e=>e.remove());
+
+  const positions = [
+    {top:"5%",left:"40%"},
+    {top:"20%",left:"80%"},
+    {top:"60%",left:"80%"},
+    {top:"80%",left:"40%"},
+    {top:"60%",left:"0%"},
+    {top:"20%",left:"0%"}
+  ];
+
+  players.forEach((p,index)=>{
+
+    const seat = document.createElement("div");
+    seat.className="seat";
+
+    if(p.id === currentTurn){
+      seat.classList.add("turn");
     }
-});
 
-socket.on("countdown", sec => {
-    document.getElementById("countdown").innerText = 
-    "La partida empieza en: " + sec;
-});
+    seat.style.top = positions[index].top;
+    seat.style.left = positions[index].left;
 
-socket.on("gameData", data => {
+    let cardsHtml="";
 
-    document.getElementById("countdown").innerText = "";
-    document.getElementById("status").innerText = "¡Partida iniciada!";
+    if(p.id === myId){
+      p.cards.forEach(c=>{
+        cardsHtml+= `<div class="card">${c}</div>`;
+      });
+    }else{
+      if(p.active){
+        cardsHtml+= `
+          <div class="card hidden"></div>
+          <div class="card hidden"></div>
+        `;
+      }
+    }
 
-    const communityDiv = document.getElementById("community");
-    communityDiv.innerHTML = "";
-    data.community.forEach(card => {
-        communityDiv.innerHTML += `<div class="card">${card}</div>`;
-    });
+    seat.innerHTML = `
+      <div>${p.name}</div>
+      <div>$${p.money}</div>
+      ${p.id===currentTurn ? "<div style='color:yellow;'>EN TURNO</div>" : ""}
+      ${cardsHtml}
+    `;
 
-    const playerDiv = document.getElementById("player");
-    playerDiv.innerHTML = "";
-    data.playerCards.forEach(card => {
-        playerDiv.innerHTML += `<div class="card">${card}</div>`;
-    });
+    table.appendChild(seat);
+  });
+}
 
-    document.getElementById("result").innerText = 
-    "Tenés: " + data.hand;
-});
+function bet(amount){
+  socket.emit("bet", amount);
+}
+
+function allIn(){
+  socket.emit("bet", 9999);
+}
+
+function fold(){
+  socket.emit("fold");
+}
+
 </script>
 
 </body>
-</html>
+    </html>
