@@ -1,4 +1,4 @@
-    const express = require("express");
+const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
@@ -10,8 +10,6 @@ app.use(express.static("public"));
 
 const MAX_PLAYERS = 6;
 const START_MONEY = 100;
-const SMALL_BLIND = 5;
-const BIG_BLIND = 10;
 
 let players = [];
 let deck = [];
@@ -19,111 +17,205 @@ let community = [];
 let pot = 0;
 let phase = "waiting";
 let turnIndex = 0;
-let dealerIndex = 0;
 let currentBet = 0;
 let betsThisRound = 0;
 
-function createDeck() {
-  const suits = ["♠","♥","♦","♣"];
-  const values = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
-  deck = [];
-  for (let s of suits)
-    for (let v of values)
-      deck.push(v + s);
+const valuesOrder = {
+  "2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,
+  "J":11,"Q":12,"K":13,"A":14
+};
 
-  deck.sort(() => Math.random() - 0.5);
+function createDeck(){
+  const suits = ["♠","♥","♦","♣"];
+  const values = Object.keys(valuesOrder);
+  deck=[];
+  for(let s of suits)
+    for(let v of values)
+      deck.push(v+s);
+  deck.sort(()=>Math.random()-0.5);
 }
 
-function nextActivePlayer(index){
-  let i = index;
+function nextPlayer(i){
+  let idx=i;
   do{
-    i = (i + 1) % players.length;
-  }while(!players[i].active);
-  return i;
+    idx=(idx+1)%players.length;
+  }while(!players[idx].active);
+  return idx;
 }
 
 function startGame(){
-  if(players.length < 2) return;
+  if(players.filter(p=>p.money>0).length<2) return;
 
   createDeck();
-  community = [];
-  pot = 0;
-  currentBet = BIG_BLIND;
-  betsThisRound = 0;
-  phase = "preflop";
+  community=[];
+  pot=0;
+  currentBet=0;
+  betsThisRound=0;
+  phase="preflop";
 
   players.forEach(p=>{
-    p.cards = [deck.pop(), deck.pop()];
-    p.active = true;
-    p.bet = 0;
+    if(p.money>0){
+      p.active=true;
+      p.folded=false;
+      p.cards=[deck.pop(),deck.pop()];
+      p.bet=0;
+    }
   });
 
-  dealerIndex = (dealerIndex + 1) % players.length;
-
-  const sb = nextActivePlayer(dealerIndex);
-  const bb = nextActivePlayer(sb);
-
-  players[sb].money -= SMALL_BLIND;
-  players[bb].money -= BIG_BLIND;
-  players[sb].bet = SMALL_BLIND;
-  players[bb].bet = BIG_BLIND;
-
-  pot = SMALL_BLIND + BIG_BLIND;
-  turnIndex = nextActivePlayer(bb);
-
-  io.emit("message", "Nueva ronda iniciada");
+  turnIndex=0;
   updateState();
 }
 
 function advancePhase(){
-  betsThisRound = 0;
+
+  betsThisRound=0;
   players.forEach(p=>p.bet=0);
-  currentBet = 0;
+  currentBet=0;
 
   if(phase==="preflop"){
     phase="flop";
-    community.push(deck.pop(), deck.pop(), deck.pop());
-  }else if(phase==="flop"){
+    community.push(deck.pop(),deck.pop(),deck.pop());
+  }
+  else if(phase==="flop"){
     phase="turn";
     community.push(deck.pop());
-  }else if(phase==="turn"){
+  }
+  else if(phase==="turn"){
     phase="river";
     community.push(deck.pop());
-  }else{
-    determineWinner();
+  }
+  else{
+    showdown();
     return;
   }
 
-  turnIndex = nextActivePlayer(dealerIndex);
+  turnIndex=0;
   updateState();
 }
 
-function determineWinner(){
-  const activePlayers = players.filter(p=>p.active);
-  const winner = activePlayers[Math.floor(Math.random()*activePlayers.length)];
-  winner.money += pot;
+function showdown(){
 
-  io.emit("message", winner.name + " ganó el pozo de $" + pot);
+  phase="showdown";
+
+  players.forEach(p=>{
+    if(!p.folded && p.active){
+      p.bestHand = evaluate([...p.cards,...community]);
+    }
+  });
+
+  const active = players.filter(p=>!p.folded && p.active);
+
+  active.sort((a,b)=>compareHands(b.bestHand,a.bestHand));
+
+  const winner = active[0];
+  winner.money+=pot;
+
+  io.emit("showdown",{
+    winner:winner.id,
+    description:winner.bestHand.description
+  });
 
   setTimeout(()=>{
-    if(players.filter(p=>p.money>0).length>=2){
-      startGame();
-    }else{
-      phase="waiting";
-      io.emit("message","Esperando más jugadores");
-      updateState();
-    }
-  },3000);
+    phase="waiting";
+    startGame();
+  },5000);
+
+  updateState(true);
 }
 
-function updateState(){
+function evaluate(cards){
+
+  const counts={};
+  const suits={};
+
+  let values=[];
+
+  cards.forEach(c=>{
+    const v=c.slice(0,-1);
+    const s=c.slice(-1);
+    values.push(valuesOrder[v]);
+    counts[v]=(counts[v]||0)+1;
+    suits[s]=(suits[s]||0)+1;
+  });
+
+  values.sort((a,b)=>b-a);
+
+  const isFlush = Object.values(suits).some(x=>x>=5);
+  const uniqueVals=[...new Set(values)].sort((a,b)=>b-a);
+
+  let isStraight=false;
+  for(let i=0;i<uniqueVals.length-4;i++){
+    if(uniqueVals[i]-uniqueVals[i+4]===4){
+      isStraight=true;
+      break;
+    }
+  }
+
+  let groups=Object.entries(counts)
+    .map(([v,c])=>({value:valuesOrder[v],count:c}))
+    .sort((a,b)=>b.count-a.count || b.value-a.value);
+
+  let rank=1;
+  let description="High Card";
+
+  if(isStraight && isFlush){
+    rank=9;
+    description="Straight Flush";
+  }
+  else if(groups[0].count===4){
+    rank=8;
+    description="Four of a Kind";
+  }
+  else if(groups[0].count===3 && groups[1]?.count>=2){
+    rank=7;
+    description="Full House";
+  }
+  else if(isFlush){
+    rank=6;
+    description="Flush";
+  }
+  else if(isStraight){
+    rank=5;
+    description="Straight";
+  }
+  else if(groups[0].count===3){
+    rank=4;
+    description="Three of a Kind";
+  }
+  else if(groups[0].count===2 && groups[1]?.count===2){
+    rank=3;
+    description="Two Pair";
+  }
+  else if(groups[0].count===2){
+    rank=2;
+    description="Pair";
+  }
+
+  return {
+    rank,
+    values:groups.map(g=>g.value),
+    description
+  };
+}
+
+function compareHands(a,b){
+  if(a.rank!==b.rank) return a.rank-b.rank;
+  for(let i=0;i<a.values.length;i++){
+    if(a.values[i]!==b.values[i])
+      return a.values[i]-b.values[i];
+  }
+  return 0;
+}
+
+function updateState(reveal=false){
   io.emit("update",{
     players,
     gameState:{
       community,
       pot,
       phase,
-      turn: players[turnIndex]?.id
+      turn: players[turnIndex]?.id,
+      reveal
     }
   });
 }
@@ -135,16 +227,17 @@ io.on("connection",(socket)=>{
     return;
   }
 
-  const newPlayer={
+  const player={
     id:socket.id,
     name:"Jugador "+(players.length+1),
     money:START_MONEY,
     cards:[],
+    folded:false,
     active:true,
     bet:0
   };
 
-  players.push(newPlayer);
+  players.push(player);
 
   if(players.length>=2 && phase==="waiting"){
     startGame();
@@ -153,25 +246,26 @@ io.on("connection",(socket)=>{
   updateState();
 
   socket.on("bet",(amount)=>{
-    const player = players.find(p=>p.id===socket.id);
-    if(!player || players[turnIndex].id!==socket.id) return;
+    const p=players.find(x=>x.id===socket.id);
+    if(!p || players[turnIndex].id!==socket.id) return;
 
-    if(amount===9999) amount = player.money;
+    if(amount===0){
+      if(currentBet===0){
+        betsThisRound++;
+        turnIndex=nextPlayer(turnIndex);
+      }
+    }else{
+      if(amount<p.money){
+        p.money-=amount;
+        p.bet+=amount;
+        pot+=amount;
+        currentBet=p.bet;
+      }
+      betsThisRound++;
+      turnIndex=nextPlayer(turnIndex);
+    }
 
-    if(amount < currentBet) return;
-
-    if(amount>player.money) amount=player.money;
-
-    player.money -= amount;
-    player.bet += amount;
-    pot += amount;
-    currentBet = player.bet;
-
-    betsThisRound++;
-
-    turnIndex = nextActivePlayer(turnIndex);
-
-    if(betsThisRound>=players.filter(p=>p.active).length){
+    if(betsThisRound>=players.filter(x=>!x.folded).length){
       advancePhase();
     }
 
@@ -179,25 +273,24 @@ io.on("connection",(socket)=>{
   });
 
   socket.on("fold",()=>{
-    const player = players.find(p=>p.id===socket.id);
-    if(!player || players[turnIndex].id!==socket.id) return;
+    const p=players.find(x=>x.id===socket.id);
+    if(!p) return;
+    p.folded=true;
 
-    player.active=false;
-
-    if(players.filter(p=>p.active).length===1){
-      determineWinner();
+    if(players.filter(x=>!x.folded).length===1){
+      showdown();
       return;
     }
 
-    turnIndex = nextActivePlayer(turnIndex);
+    turnIndex=nextPlayer(turnIndex);
     updateState();
   });
 
   socket.on("disconnect",()=>{
-    players = players.filter(p=>p.id!==socket.id);
+    players=players.filter(x=>x.id!==socket.id);
     updateState();
   });
 
 });
 
-server.listen(3000,()=>console.log("Servidor activo"));
+server.listen(process.env.PORT||3000);
