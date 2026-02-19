@@ -17,6 +17,12 @@ body{
 
 h1{ margin:15px; }
 
+#stage{
+  font-size:18px;
+  margin-top:5px;
+  color:#00ffcc;
+}
+
 #table{
   width:900px;
   height:520px;
@@ -129,16 +135,11 @@ button{
 
 .chip{
   position:absolute;
-  width:25px;
-  height:25px;
+  width:20px;
+  height:20px;
   background:red;
   border-radius:50%;
-  animation:fly 0.8s ease forwards;
-}
-
-@keyframes fly{
-  from{transform:translate(0,0);}
-  to{transform:translate(350px,200px);}
+  pointer-events:none;
 }
 
 </style>
@@ -146,7 +147,7 @@ button{
 <body>
 
 <h1>♠ Texas Hold'em Pro ♣</h1>
-
+<div id="stage"></div>
 <div id="pot">Pozo: $0</div>
 <div id="sidepots"></div>
 
@@ -155,7 +156,6 @@ button{
 </div>
 
 <div id="winnerText"></div>
-
 <div id="controls"></div>
 
 <script>
@@ -164,6 +164,7 @@ const socket=io();
 let myId=null;
 let gameState=null;
 let playersGlobal=[];
+let previousBets={};
 
 socket.on("connect",()=>myId=socket.id);
 
@@ -174,11 +175,18 @@ socket.on("update",data=>{
   document.getElementById("pot").innerText=
     "Pozo: $"+gameState.pot;
 
+  renderStage();
   renderSidePots();
   renderCommunity();
   renderPlayers();
   renderControls();
 });
+
+function renderStage(){
+  const stages=["Preflop","Flop","Turn","River","Showdown"];
+  document.getElementById("stage").innerText=
+    stages[gameState.stage] || "";
+}
 
 function renderSidePots(){
   const div=document.getElementById("sidepots");
@@ -260,7 +268,13 @@ function renderPlayers(){
 
     document.getElementById("table").appendChild(seat);
 
-    if(p.bet>0) animateChips(seat);
+    // 🔥 animación solo si aumentó apuesta
+    if(previousBets[p.id] !== undefined &&
+       p.bet > previousBets[p.id]){
+      animateChips(seat);
+    }
+
+    previousBets[p.id]=p.bet;
   });
 }
 
@@ -275,7 +289,29 @@ function animateChips(seat){
   const chip=document.createElement("div");
   chip.className="chip";
   seat.appendChild(chip);
-  setTimeout(()=>chip.remove(),800);
+
+  const table=document.getElementById("table");
+  const rectSeat=seat.getBoundingClientRect();
+  const rectTable=table.getBoundingClientRect();
+
+  const startX=rectSeat.left - rectTable.left + 70;
+  const startY=rectSeat.top - rectTable.top + 70;
+
+  chip.style.left=startX+"px";
+  chip.style.top=startY+"px";
+
+  const endX=rectTable.width/2;
+  const endY=rectTable.height/2;
+
+  chip.animate([
+    { transform:"translate(0,0)" },
+    { transform:`translate(${endX-startX}px,${endY-startY}px)` }
+  ],{
+    duration:700,
+    easing:"ease-out"
+  });
+
+  setTimeout(()=>chip.remove(),700);
 }
 
 /* =========================
@@ -290,6 +326,7 @@ function renderControls(){
   const me=playersGlobal.find(p=>p.id===myId);
   if(!me) return;
   if(gameState.turn!==myId) return;
+  if(me.allIn) return;
 
   const toCall=gameState.currentBet - me.bet;
 
@@ -310,6 +347,7 @@ function renderControls(){
   const raiseInput=document.createElement("input");
   raiseInput.type="number";
   raiseInput.min="1";
+  raiseInput.max=me.money;
   raiseInput.className="raiseInput";
   raiseInput.placeholder="Raise";
 
@@ -317,7 +355,7 @@ function renderControls(){
   raiseBtn.innerText="Raise";
   raiseBtn.onclick=()=>{
     const val=parseInt(raiseInput.value);
-    if(val>0)
+    if(val>0 && val<=me.money)
       socket.emit("raise",val);
   };
 
