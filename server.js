@@ -134,6 +134,24 @@ function nextTurn() {
     currentIndex = (currentIndex + 1) % players.length;
   } while (players[currentIndex].folded);
 
+  const nextPlayerId = players[currentIndex].id;
+
+  // 🔥 Si volvimos al primer jugador, avanzamos fase
+  if (nextPlayerId === players[0].id) {
+    advanceStage();
+  }
+
+  gameState.turn = nextPlayerId;
+
+  io.emit("update", { players, gameState });
+}
+
+  let currentIndex = players.findIndex(p => p.id === gameState.turn);
+
+  do {
+    currentIndex = (currentIndex + 1) % players.length;
+  } while (players[currentIndex].folded);
+
   gameState.turn = players[currentIndex].id;
 
   advanceStageIfNeeded();
@@ -141,14 +159,7 @@ function nextTurn() {
   io.emit("update", { players, gameState });
 }
 
-function advanceStageIfNeeded() {
-
-  const active = players.filter(p => !p.folded);
-  const allPlayed = active.every(p => p.bet > 0 || p.money === 0);
-
-  if (!allPlayed) return;
-
-  players.forEach(p => p.bet = 0);
+function advanceStage() {
 
   gameState.stage++;
 
@@ -164,6 +175,7 @@ function advanceStageIfNeeded() {
   else if (gameState.stage >= 4) {
     return endRound();
   }
+
 }
 
 function endRound() {
