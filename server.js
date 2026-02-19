@@ -34,6 +34,7 @@ let gameState = {
 
 io.on("connection", socket => {
 
+  if (players.find(p => p.id === socket.id)) return;
   if (players.length >= 6) return;
 
   players.push({
@@ -75,6 +76,8 @@ function playerCall(id){
   if (!canPlay(p)) return;
 
   const toCall = gameState.currentBet - p.bet;
+  if (toCall <= 0) return;
+
   betAmount(p, toCall);
   nextTurn();
 }
@@ -82,13 +85,16 @@ function playerCall(id){
 function playerCheck(id){
   const p = getPlayer(id);
   if (!canPlay(p)) return;
+
   if (p.bet !== gameState.currentBet) return;
+
   nextTurn();
 }
 
 function playerFold(id){
   const p = getPlayer(id);
   if (!p) return;
+
   p.folded = true;
   nextTurn();
 }
@@ -98,6 +104,8 @@ function playerRaise(id, amount){
   if (!canPlay(p)) return;
 
   amount = Number(amount);
+  if (isNaN(amount) || amount <= 0) return;
+
   const toCall = gameState.currentBet - p.bet;
   const total = toCall + amount;
 
@@ -110,6 +118,7 @@ function playerRaise(id, amount){
 }
 
 function betAmount(player, amount){
+
   if (amount >= player.money){
     amount = player.money;
     player.allIn = true;
@@ -131,51 +140,60 @@ function startGame(){
   shuffle(deck);
 
   resetBets();
+
   gameState.pot = 0;
   gameState.sidePots = [];
   gameState.community = [];
   gameState.stage = 0;
   gameState.reveal = false;
-  gameState.currentBet = BIG_BLIND;
+  gameState.currentBet = 0;
   gameState.lastAggressor = null;
 
   players.forEach(p=>{
-    p.cards=[deck.pop(),deck.pop()];
-    p.folded=false;
-    p.allIn=false;
+    p.cards = [deck.pop(), deck.pop()];
+    p.folded = false;
+    p.allIn = false;
   });
 
   assignRoles();
   applyBlinds();
 
   const bbIndex = players.findIndex(p=>p.role==="BB");
-  const first = (bbIndex+1)%players.length;
+  let first = (bbIndex + 1) % players.length;
+
+  while(players[first].folded || players[first].allIn)
+    first = (first + 1) % players.length;
+
   gameState.turn = players[first].id;
 
   io.emit("update",{players,gameState});
 }
 
-function nextTurn(raised=false){
+function nextTurn(){
 
-  const active = players.filter(p=>!p.folded && !p.allIn);
+  const active = players.filter(p=>!p.folded);
 
-  if (active.length<=1)
+  if (active.length === 1)
     return advanceStage();
 
   let idx = players.findIndex(p=>p.id===gameState.turn);
 
+  let startIdx = idx;
+
   do{
-    idx=(idx+1)%players.length;
+    idx = (idx + 1) % players.length;
   }while(players[idx].folded || players[idx].allIn);
 
   gameState.turn = players[idx].id;
 
-  const allMatched = players
-    .filter(p=>!p.folded && !p.allIn)
-    .every(p=>p.bet===gameState.currentBet);
+  const bettingPlayers = players.filter(p=>!p.folded && !p.allIn);
 
-  if (allMatched && gameState.lastAggressor===players[idx].id){
-    return advanceStage();
+  const allMatched = bettingPlayers.every(p=>p.bet === gameState.currentBet);
+
+  if (allMatched){
+    if (!gameState.lastAggressor || gameState.turn === gameState.lastAggressor){
+      return advanceStage();
+    }
   }
 
   io.emit("update",{players,gameState});
@@ -185,22 +203,31 @@ function advanceStage(){
 
   collectBetsToPot();
 
-  gameState.currentBet=0;
-  gameState.lastAggressor=null;
+  gameState.currentBet = 0;
+  gameState.lastAggressor = null;
 
   gameState.stage++;
 
-  if (gameState.stage===1)
+  if (gameState.stage === 1){
     gameState.community.push(deck.pop(),deck.pop(),deck.pop());
-  else if (gameState.stage===2)
+  }
+  else if (gameState.stage === 2){
     gameState.community.push(deck.pop());
-  else if (gameState.stage===3)
+  }
+  else if (gameState.stage === 3){
     gameState.community.push(deck.pop());
-  else
+  }
+  else{
     return showdown();
+  }
 
-  const dealerPos=dealerIndex%players.length;
-  gameState.turn=players[(dealerPos+1)%players.length].id;
+  const dealerPos = dealerIndex % players.length;
+  let next = (dealerPos + 1) % players.length;
+
+  while(players[next].folded || players[next].allIn)
+    next = (next + 1) % players.length;
+
+  gameState.turn = players[next].id;
 
   io.emit("update",{players,gameState});
 }
@@ -208,14 +235,12 @@ function advanceStage(){
 function collectBetsToPot(){
 
   const active = players.filter(p=>p.totalBet>0);
-
   const sorted=[...active].sort((a,b)=>a.totalBet-b.totalBet);
 
   while(sorted.length){
 
     const min=sorted[0].totalBet;
     const involved=sorted.filter(p=>p.totalBet>=min);
-
     const potAmount=min*involved.length;
 
     gameState.sidePots.push({
@@ -241,9 +266,14 @@ function collectBetsToPot(){
 
 function showdown(){
 
-  gameState.reveal=true;
+  gameState.reveal = true;
 
   const active = players.filter(p=>!p.folded);
+
+  if (active.length === 1){
+    active[0].money += gameState.pot;
+    return resetRoundDelayed();
+  }
 
   gameState.sidePots.forEach(pot=>{
 
@@ -262,15 +292,19 @@ function showdown(){
     );
 
     const split = pot.amount / winners.length;
-
     winners.forEach(w=>w.player.money+=split);
   });
 
   io.emit("update",{players,gameState});
 
   dealerIndex++;
-
   setTimeout(resetRound,6000);
+}
+
+function resetRoundDelayed(){
+  io.emit("update",{players,gameState});
+  dealerIndex++;
+  setTimeout(resetRound,4000);
 }
 
 function resetRound(){
@@ -320,8 +354,15 @@ function applyBlinds(){
   const sb=players.find(p=>p.role==="SB");
   const bb=players.find(p=>p.role==="BB");
 
-  if(sb) betAmount(sb,SMALL_BLIND);
-  if(bb) betAmount(bb,BIG_BLIND);
+  if(sb){
+    betAmount(sb,SMALL_BLIND);
+    gameState.currentBet=SMALL_BLIND;
+  }
+
+  if(bb){
+    betAmount(bb,BIG_BLIND);
+    gameState.currentBet=BIG_BLIND;
+  }
 }
 
 /* =========================
