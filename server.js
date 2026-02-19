@@ -1,326 +1,206 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Poker Online</title>
+<script src="/socket.io/socket.io.js"></script>
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+<style>
 
-app.use(express.static("public"));
-server.listen(process.env.PORT || 3000);
+body{
+  margin:0;
+  background:#0e1a2b;
+  font-family:Arial;
+  color:white;
+  text-align:center;
+}
 
-let players = [];
-let deck = [];
-let gameRunning = false;
-let dealerIndex = 0;
+#table{
+  width:850px;
+  height:500px;
+  margin:20px auto;
+  background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
+  border-radius:250px;
+  position:relative;
+  border:12px solid #5a3e1b;
+}
 
-const SMALL_BLIND = 5;
-const BIG_BLIND = 10;
+.seat{
+  width:150px;
+  height:140px;
+  background:#1c1c1c;
+  border-radius:12px;
+  position:absolute;
+  padding:6px;
+  font-size:14px;
+}
 
-let gameState = {
-  pot: 0,
-  community: [],
-  turn: null,
-  reveal: false,
-  stage: 0,
-  currentBet: 0
-};
+.turn{
+  border:2px solid gold;
+}
 
-/* =========================
-   CONEXIONES
-========================= */
+.role{
+  display:inline-block;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  font-size:12px;
+  line-height:22px;
+  font-weight:bold;
+  margin-left:4px;
+}
 
-io.on("connection", socket => {
+.dealer{ background:gold; color:black; }
+.sb{ background:#3fa9f5; }
+.bb{ background:#ff4d4d; }
 
-  if (players.find(p => p.id === socket.id)) return;
-  if (players.length >= 6) return;
+.card{
+  display:inline-block;
+  width:60px;
+  height:90px;
+  background:white;
+  border-radius:8px;
+  margin:3px;
+  position:relative;
+  border:1px solid #ccc;
+  font-weight:bold;
+}
 
-  const player = {
-    id: socket.id,
-    name: "Jugador " + (players.length + 1),
-    money: 100,
-    cards: [],
-    folded: false,
-    bet: 0,
-    role: ""
-  };
+.card .top{
+  position:absolute;
+  top:4px;
+  left:6px;
+  font-size:14px;
+}
 
-  players.push(player);
+.card .bottom{
+  position:absolute;
+  bottom:4px;
+  right:6px;
+  font-size:14px;
+  transform:rotate(180deg);
+}
 
-  if (players.length >= 2 && !gameRunning) {
-    startGame();
-  }
+.card .center{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  font-size:26px;
+}
 
-  io.emit("update", { players, gameState });
+.red{ color:red; }
+.black{ color:black; }
 
-  socket.on("call", () => {
+.hidden{
+  background:#222;
+}
 
-    if (!gameRunning) return;
-    if (gameState.turn !== socket.id) return;
+#community{
+  position:absolute;
+  top:45%;
+  left:50%;
+  transform:translate(-50%,-50%);
+}
 
-    const p = players.find(x => x.id === socket.id);
-    if (!p || p.folded) return;
+</style>
+</head>
+<body>
 
-    const toCall = gameState.currentBet - p.bet;
+<h1>♠ Texas Hold'em ♣</h1>
+<div id="pot">Pozo: $0</div>
+<div id="table">
+  <div id="community"></div>
+</div>
 
-    if (toCall <= 0) return;
+<script>
 
-    const amount = Math.min(toCall, p.money);
+const socket=io();
+let myId=null;
+let currentTurn=null;
+let revealCards=false;
 
-    p.money -= amount;
-    p.bet += amount;
+socket.on("connect",()=>{ myId=socket.id; });
 
-    nextTurn();
-  });
+socket.on("update",data=>{
+  currentTurn=data.gameState.turn;
+  revealCards=data.gameState.reveal;
 
-  socket.on("check", () => {
+  document.getElementById("pot").innerText="Pozo: $"+data.gameState.pot;
 
-    if (gameState.turn !== socket.id) return;
-
-    const p = players.find(x => x.id === socket.id);
-
-    if (p.bet !== gameState.currentBet) return; // NO puede checkear si no igualó
-
-    nextTurn();
-  });
-
-  socket.on("fold", () => {
-
-    const p = players.find(x => x.id === socket.id);
-    if (!p) return;
-
-    p.folded = true;
-    nextTurn();
-  });
-
-  socket.on("disconnect", () => {
-
-    players = players.filter(p => p.id !== socket.id);
-
-    if (players.length < 2) {
-      gameRunning = false;
-      gameState.turn = null;
-    }
-
-    io.emit("update", { players, gameState });
-  });
-
+  renderCommunity(data.gameState.community);
+  renderPlayers(data.players,data.gameState);
 });
 
-/* =========================
-   INICIO
-========================= */
+function renderCommunity(cards){
+  const div=document.getElementById("community");
+  div.innerHTML="";
+  cards.forEach(c=> div.appendChild(createCard(c)));
+}
 
-function startGame() {
+function createCard(text){
+  const suit=text.slice(-1);
+  const value=text.slice(0,-1);
+  const color=(suit==="♥"||suit==="♦")?"red":"black";
 
-  gameRunning = true;
+  const div=document.createElement("div");
+  div.className="card "+color;
+  div.innerHTML=`
+    <div class="top">${value}${suit}</div>
+    <div class="center">${suit}</div>
+    <div class="bottom">${value}${suit}</div>
+  `;
+  return div;
+}
 
-  deck = createDeck();
-  shuffle(deck);
+function renderPlayers(players,gameState){
 
-  gameState.community = [];
-  gameState.pot = 0;
-  gameState.stage = 0;
-  gameState.reveal = false;
-  gameState.currentBet = BIG_BLIND;
+  document.querySelectorAll(".seat").forEach(e=>e.remove());
 
-  players.forEach(p => {
-    p.cards = [deck.pop(), deck.pop()];
-    p.folded = false;
-    p.bet = 0;
-    p.role = "";
+  const positions=[
+    {top:"5%",left:"45%"},
+    {top:"20%",left:"80%"},
+    {top:"65%",left:"80%"},
+    {top:"80%",left:"45%"},
+    {top:"65%",left:"5%"},
+    {top:"20%",left:"5%"}
+  ];
+
+  players.forEach((p,index)=>{
+
+    const seat=document.createElement("div");
+    seat.className="seat";
+    seat.style.top=positions[index].top;
+    seat.style.left=positions[index].left;
+
+    if(index===gameState.dealerIndex)
+      seat.innerHTML+=`<span class="role dealer">D</span>`;
+    if(index===gameState.sbIndex)
+      seat.innerHTML+=`<span class="role sb">SB</span>`;
+    if(index===gameState.bbIndex)
+      seat.innerHTML+=`<span class="role bb">BB</span>`;
+
+    if(p.id===currentTurn)
+      seat.classList.add("turn");
+
+    let cardsHtml="";
+
+    if(p.id===myId || revealCards){
+      p.cards.forEach(c=> seat.appendChild(createCard(c)));
+    }else if(!p.folded){
+      seat.innerHTML+=`
+        <div class="card hidden"></div>
+        <div class="card hidden"></div>
+      `;
+    }
+
+    seat.innerHTML+=`<div><b>${p.name}</b></div><div>$${p.money}</div>`;
+
+    document.getElementById("table").appendChild(seat);
   });
-
-  assignRoles();
-  applyBlinds();
-
-  // Empieza el jugador después de la BB
-  const bbIndex = players.findIndex(p => p.role === "BB");
-  const first = (bbIndex + 1) % players.length;
-
-  gameState.turn = players[first].id;
-
-  io.emit("update", { players, gameState });
 }
 
-/* =========================
-   ROLES
-========================= */
+</script>
 
-function assignRoles() {
-
-  players.forEach(p => p.role = "");
-
-  const dealer = dealerIndex % players.length;
-  const sb = (dealer + 1) % players.length;
-  const bb = (dealer + 2) % players.length;
-
-  players[dealer].role = "D";
-  players[sb].role = "SB";
-  players[bb].role = "BB";
-}
-
-function applyBlinds() {
-
-  const sb = players.find(p => p.role === "SB");
-  const bb = players.find(p => p.role === "BB");
-
-  if (sb) {
-    sb.money -= SMALL_BLIND;
-    sb.bet = SMALL_BLIND;
-  }
-
-  if (bb) {
-    bb.money -= BIG_BLIND;
-    bb.bet = BIG_BLIND;
-  }
-}
-
-/* =========================
-   TURNOS
-========================= */
-
-function nextTurn() {
-
-  const active = players.filter(p => !p.folded);
-
-  if (active.length === 1) {
-    return endRound();
-  }
-
-  // Verificar si todos igualaron
-  const allMatched = active.every(p => p.bet === gameState.currentBet);
-
-  if (allMatched) {
-    return advanceStage();
-  }
-
-  let currentIndex = players.findIndex(p => p.id === gameState.turn);
-
-  do {
-    currentIndex = (currentIndex + 1) % players.length;
-  } while (players[currentIndex].folded);
-
-  gameState.turn = players[currentIndex].id;
-
-  io.emit("update", { players, gameState });
-}
-
-/* =========================
-   ETAPAS
-========================= */
-
-function advanceStage() {
-
-  players.forEach(p => {
-    gameState.pot += p.bet;
-    p.bet = 0;
-  });
-
-  gameState.currentBet = 0;
-  gameState.stage++;
-
-  if (gameState.stage === 1)
-    gameState.community.push(deck.pop(), deck.pop(), deck.pop());
-  else if (gameState.stage === 2)
-    gameState.community.push(deck.pop());
-  else if (gameState.stage === 3)
-    gameState.community.push(deck.pop());
-  else
-    return endRound();
-
-  const dealerPos = dealerIndex % players.length;
-  const first = (dealerPos + 1) % players.length;
-  gameState.turn = players[first].id;
-
-  io.emit("update", { players, gameState });
-}
-
-/* =========================
-   FINAL
-========================= */
-
-function endRound() {
-
-  const active = players.filter(p => !p.folded);
-
-  let winner;
-
-  if (active.length === 1) {
-    winner = active[0];
-  } else {
-
-    const results = active.map(p => ({
-      player: p,
-      result: evaluateHand([...p.cards, ...gameState.community])
-    }));
-
-    results.sort((a, b) => compareHands(b.result, a.result));
-
-    winner = results[0].player;
-
-    io.emit("showdown", {
-      winner: winner.id,
-      description: results[0].result.name
-    });
-  }
-
-  winner.money += gameState.pot;
-  gameState.reveal = true;
-
-  io.emit("update", { players, gameState });
-
-  dealerIndex++;
-
-  setTimeout(resetRound, 5000);
-}
-
-function resetRound() {
-
-  gameState.community = [];
-  gameState.pot = 0;
-  gameState.stage = 0;
-  gameState.turn = null;
-  gameState.reveal = false;
-
-  players.forEach(p => {
-    p.cards = [];
-    p.folded = false;
-    p.bet = 0;
-    p.role = "";
-  });
-
-  if (players.length >= 2)
-    startGame();
-  else
-    gameRunning = false;
-}
-
-/* =========================
-   CARTAS + EVALUADOR
-========================= */
-
-function createDeck(){
-  const suits=["♠","♥","♦","♣"];
-  const values=["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
-  let d=[];
-  for (let s of suits)
-    for (let v of values)
-      d.push(v+s);
-  return d;
-}
-
-function shuffle(array){
-  for (let i=array.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [array[i],array[j]]=[array[j],array[i]];
-  }
-}
-
-function evaluateHand(cards){
-  return {rank:0, values:[0], name:"Evaluador pendiente"};
-}
-
-function compareHands(a,b){
-  return a.rank - b.rank;
-}
+</body>
+</html>
