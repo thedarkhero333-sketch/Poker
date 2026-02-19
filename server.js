@@ -12,7 +12,6 @@ server.listen(process.env.PORT || 3000);
 let players = [];
 let deck = [];
 let gameRunning = false;
-
 let dealerIndex = 0;
 
 let gameState = {
@@ -20,7 +19,7 @@ let gameState = {
   community: [],
   turn: null,
   reveal: false,
-  stage: 0, // 0 preflop | 1 flop | 2 turn | 3 river
+  stage: 0,
   betsThisRound: 0
 };
 
@@ -29,6 +28,11 @@ let gameState = {
 ========================= */
 
 io.on("connection", socket => {
+
+  console.log("Nuevo socket:", socket.id);
+
+  // 🚨 EVITAR DUPLICADOS
+  if (players.find(p => p.id === socket.id)) return;
 
   if (players.length >= 6) return;
 
@@ -43,11 +47,17 @@ io.on("connection", socket => {
 
   players.push(player);
 
+  console.log("Jugadores activos:", players.length);
+
   if (players.length >= 2 && !gameRunning) {
     startGame();
   }
 
   io.emit("update", { players, gameState });
+
+  /* =========================
+     EVENTOS
+  ========================= */
 
   socket.on("bet", amount => {
 
@@ -71,6 +81,7 @@ io.on("connection", socket => {
 
   socket.on("check", () => {
 
+    if (!gameRunning) return;
     if (gameState.turn !== socket.id) return;
 
     gameState.betsThisRound++;
@@ -87,6 +98,8 @@ io.on("connection", socket => {
   });
 
   socket.on("disconnect", () => {
+
+    console.log("Desconectado:", socket.id);
 
     players = players.filter(p => p.id !== socket.id);
 
@@ -127,7 +140,6 @@ function startGame() {
 
   dealerIndex = dealerIndex % players.length;
 
-  // Primer turno = jugador a la izquierda del dealer
   const first = (dealerIndex + 1) % players.length;
   gameState.turn = players[first].id;
 
@@ -154,7 +166,6 @@ function nextTurn() {
 
   gameState.turn = players[currentIndex].id;
 
-  // Si todos actuaron → avanzar etapa
   if (gameState.betsThisRound >= active.length) {
     advanceStage();
   }
@@ -168,14 +179,12 @@ function nextTurn() {
 
 function advanceStage() {
 
-  // Mover apuestas al pozo
   players.forEach(p => {
     gameState.pot += p.bet;
     p.bet = 0;
   });
 
   gameState.betsThisRound = 0;
-
   gameState.stage++;
 
   if (gameState.stage === 1) {
@@ -191,7 +200,6 @@ function advanceStage() {
     return endRound();
   }
 
-  // Nuevo turno empieza desde dealer+1
   const first = (dealerIndex + 1) % players.length;
   gameState.turn = players[first].id;
 }
@@ -226,7 +234,6 @@ function endRound() {
   }
 
   winner.money += gameState.pot;
-
   gameState.reveal = true;
 
   io.emit("update", { players, gameState });
@@ -262,7 +269,6 @@ function resetRound() {
 ========================= */
 
 function evaluateHand(cards) {
-
   const order = "23456789TJQKA";
   const nums = cards.map(c => order.indexOf(c[0])).sort((a,b)=>b-a);
   const suits = cards.map(c => c[1]);
@@ -345,4 +351,3 @@ function shuffle(array){
     [array[i],array[j]]=[array[j],array[i]];
   }
 }
-
