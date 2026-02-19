@@ -1,206 +1,263 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Poker Online</title>
-<script src="/socket.io/socket.io.js"></script>
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
-<style>
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-body{
-  margin:0;
-  background:#0e1a2b;
-  font-family:Arial;
-  color:white;
-  text-align:center;
-}
+app.use(express.static("public"));
 
-#table{
-  width:850px;
-  height:500px;
-  margin:20px auto;
-  background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
-  border-radius:250px;
-  position:relative;
-  border:12px solid #5a3e1b;
-}
-
-.seat{
-  width:150px;
-  height:140px;
-  background:#1c1c1c;
-  border-radius:12px;
-  position:absolute;
-  padding:6px;
-  font-size:14px;
-}
-
-.turn{
-  border:2px solid gold;
-}
-
-.role{
-  display:inline-block;
-  width:22px;
-  height:22px;
-  border-radius:50%;
-  font-size:12px;
-  line-height:22px;
-  font-weight:bold;
-  margin-left:4px;
-}
-
-.dealer{ background:gold; color:black; }
-.sb{ background:#3fa9f5; }
-.bb{ background:#ff4d4d; }
-
-.card{
-  display:inline-block;
-  width:60px;
-  height:90px;
-  background:white;
-  border-radius:8px;
-  margin:3px;
-  position:relative;
-  border:1px solid #ccc;
-  font-weight:bold;
-}
-
-.card .top{
-  position:absolute;
-  top:4px;
-  left:6px;
-  font-size:14px;
-}
-
-.card .bottom{
-  position:absolute;
-  bottom:4px;
-  right:6px;
-  font-size:14px;
-  transform:rotate(180deg);
-}
-
-.card .center{
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  font-size:26px;
-}
-
-.red{ color:red; }
-.black{ color:black; }
-
-.hidden{
-  background:#222;
-}
-
-#community{
-  position:absolute;
-  top:45%;
-  left:50%;
-  transform:translate(-50%,-50%);
-}
-
-</style>
-</head>
-<body>
-
-<h1>♠ Texas Hold'em ♣</h1>
-<div id="pot">Pozo: $0</div>
-<div id="table">
-  <div id="community"></div>
-</div>
-
-<script>
-
-const socket=io();
-let myId=null;
-let currentTurn=null;
-let revealCards=false;
-
-socket.on("connect",()=>{ myId=socket.id; });
-
-socket.on("update",data=>{
-  currentTurn=data.gameState.turn;
-  revealCards=data.gameState.reveal;
-
-  document.getElementById("pot").innerText="Pozo: $"+data.gameState.pot;
-
-  renderCommunity(data.gameState.community);
-  renderPlayers(data.players,data.gameState);
+server.listen(3000, () => {
+  console.log("Servidor corriendo en puerto 3000");
 });
 
-function renderCommunity(cards){
-  const div=document.getElementById("community");
-  div.innerHTML="";
-  cards.forEach(c=> div.appendChild(createCard(c)));
-}
+let players = [];
+let gameState = {
+  started: false,
+  turn: null,
+  pot: 0,
+  community: [],
+  reveal: false,
+  dealerIndex: 0,
+  currentBet: 0,
+  stage: "waiting"
+};
 
-function createCard(text){
-  const suit=text.slice(-1);
-  const value=text.slice(0,-1);
-  const color=(suit==="♥"||suit==="♦")?"red":"black";
+const MAX_PLAYERS = 6;
+const SMALL_BLIND = 5;
+const BIG_BLIND = 10;
 
-  const div=document.createElement("div");
-  div.className="card "+color;
-  div.innerHTML=`
-    <div class="top">${value}${suit}</div>
-    <div class="center">${suit}</div>
-    <div class="bottom">${value}${suit}</div>
-  `;
-  return div;
-}
+io.on("connection", socket => {
 
-function renderPlayers(players,gameState){
+  if (players.find(p => p.id === socket.id)) return;
+  if (players.length >= MAX_PLAYERS) return;
 
-  document.querySelectorAll(".seat").forEach(e=>e.remove());
-
-  const positions=[
-    {top:"5%",left:"45%"},
-    {top:"20%",left:"80%"},
-    {top:"65%",left:"80%"},
-    {top:"80%",left:"45%"},
-    {top:"65%",left:"5%"},
-    {top:"20%",left:"5%"}
-  ];
-
-  players.forEach((p,index)=>{
-
-    const seat=document.createElement("div");
-    seat.className="seat";
-    seat.style.top=positions[index].top;
-    seat.style.left=positions[index].left;
-
-    if(index===gameState.dealerIndex)
-      seat.innerHTML+=`<span class="role dealer">D</span>`;
-    if(index===gameState.sbIndex)
-      seat.innerHTML+=`<span class="role sb">SB</span>`;
-    if(index===gameState.bbIndex)
-      seat.innerHTML+=`<span class="role bb">BB</span>`;
-
-    if(p.id===currentTurn)
-      seat.classList.add("turn");
-
-    let cardsHtml="";
-
-    if(p.id===myId || revealCards){
-      p.cards.forEach(c=> seat.appendChild(createCard(c)));
-    }else if(!p.folded){
-      seat.innerHTML+=`
-        <div class="card hidden"></div>
-        <div class="card hidden"></div>
-      `;
-    }
-
-    seat.innerHTML+=`<div><b>${p.name}</b></div><div>$${p.money}</div>`;
-
-    document.getElementById("table").appendChild(seat);
+  players.push({
+    id: socket.id,
+    name: "Jugador " + (players.length + 1),
+    money: 100,
+    cards: [],
+    bet: 0,
+    folded: false
   });
+
+  io.emit("update", { players, gameState });
+
+  if (players.length >= 2 && !gameState.started) {
+    startRound();
+  }
+
+  socket.on("bet", amount => handleBet(socket.id, amount));
+  socket.on("fold", () => handleFold(socket.id));
+
+  socket.on("disconnect", () => {
+    players = players.filter(p => p.id !== socket.id);
+    if (players.length < 2) resetGame();
+    io.emit("update", { players, gameState });
+  });
+});
+
+function resetGame() {
+  gameState.started = false;
+  gameState.stage = "waiting";
+  gameState.pot = 0;
+  gameState.community = [];
+  gameState.reveal = false;
 }
 
-</script>
+function createDeck() {
+  const suits = ["♠", "♥", "♦", "♣"];
+  const values = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+  let deck = [];
 
-</body>
-</html>
+  for (let s of suits)
+    for (let v of values)
+      deck.push(v + s);
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+function startRound() {
+
+  gameState.started = true;
+  gameState.stage = "preflop";
+  gameState.community = [];
+  gameState.pot = 0;
+  gameState.reveal = false;
+  gameState.currentBet = BIG_BLIND;
+
+  let deck = createDeck();
+
+  players.forEach(p => {
+    p.cards = [deck.pop(), deck.pop()];
+    p.bet = 0;
+    p.folded = false;
+  });
+
+  assignBlinds();
+
+  gameState.deck = deck;
+
+  io.emit("update", { players, gameState });
+}
+
+function assignBlinds() {
+
+  if (players.length < 2) return;
+
+  let sbIndex = (gameState.dealerIndex + 1) % players.length;
+  let bbIndex = (gameState.dealerIndex + 2) % players.length;
+
+  if (players.length === 2) {
+    sbIndex = gameState.dealerIndex;
+    bbIndex = (gameState.dealerIndex + 1) % 2;
+  }
+
+  players[sbIndex].money -= SMALL_BLIND;
+  players[sbIndex].bet = SMALL_BLIND;
+
+  players[bbIndex].money -= BIG_BLIND;
+  players[bbIndex].bet = BIG_BLIND;
+
+  gameState.turn = (bbIndex + 1) % players.length;
+}
+
+function handleBet(id, amount) {
+
+  const player = players.find(p => p.id === id);
+  if (!player || player.folded) return;
+  if (players[gameState.turn].id !== id) return;
+
+  if (amount === 0) {
+    if (player.bet === gameState.currentBet) {
+      nextTurn();
+    }
+    return;
+  }
+
+  if (amount !== SMALL_BLIND && amount !== BIG_BLIND) return;
+  if (player.money < amount) return;
+
+  player.money -= amount;
+  player.bet += amount;
+
+  if (player.bet > gameState.currentBet)
+    gameState.currentBet = player.bet;
+
+  nextTurn();
+}
+
+function handleFold(id) {
+
+  const player = players.find(p => p.id === id);
+  if (!player) return;
+
+  player.folded = true;
+
+  const active = players.filter(p => !p.folded);
+
+  if (active.length === 1) {
+    endRound(active[0]);
+    return;
+  }
+
+  nextTurn();
+}
+
+function nextTurn() {
+
+  let count = players.length;
+
+  for (let i = 1; i <= count; i++) {
+    let next = (gameState.turn + i) % count;
+    if (!players[next].folded) {
+      gameState.turn = next;
+      break;
+    }
+  }
+
+  if (allBetsEqual()) {
+    advanceStage();
+  }
+
+  io.emit("update", { players, gameState });
+}
+
+function allBetsEqual() {
+  const active = players.filter(p => !p.folded);
+  return active.every(p => p.bet === gameState.currentBet);
+}
+
+function advanceStage() {
+
+  players.forEach(p => {
+    gameState.pot += p.bet;
+    p.bet = 0;
+  });
+
+  gameState.currentBet = 0;
+
+  if (gameState.stage === "preflop") {
+    gameState.community.push(
+      gameState.deck.pop(),
+      gameState.deck.pop(),
+      gameState.deck.pop()
+    );
+    gameState.stage = "flop";
+  }
+  else if (gameState.stage === "flop") {
+    gameState.community.push(gameState.deck.pop());
+    gameState.stage = "turn";
+  }
+  else if (gameState.stage === "turn") {
+    gameState.community.push(gameState.deck.pop());
+    gameState.stage = "river";
+  }
+  else {
+    showdown();
+    return;
+  }
+
+  gameState.turn = (gameState.dealerIndex + 1) % players.length;
+
+  io.emit("update", { players, gameState });
+}
+
+function showdown() {
+
+  gameState.reveal = true;
+
+  // 🔥 TEMPORAL: ganador random hasta que hagamos evaluación real
+  const active = players.filter(p => !p.folded);
+  const winner = active[Math.floor(Math.random() * active.length)];
+
+  winner.money += gameState.pot;
+
+  io.emit("showdown", {
+    winner: winner.id,
+    description: "Mejor mano (modo demo)"
+  });
+
+  setTimeout(() => {
+    endRound(winner);
+  }, 5000);
+}
+
+function endRound(winner) {
+
+  gameState.pot = 0;
+  gameState.community = [];
+  gameState.reveal = false;
+  gameState.started = false;
+
+  gameState.dealerIndex = (gameState.dealerIndex + 1) % players.length;
+
+  if (players.length >= 2) {
+    startRound();
+  } else {
+    resetGame();
+  }
+
+  io.emit("update", { players, gameState });
+}
