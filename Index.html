@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Texas Hold'em</title>
+<style>
+body { background:#0b6623; color:white; text-align:center; font-family:Arial; }
+.card { display:inline-block; padding:10px; margin:5px; background:white; color:black; border-radius:8px; width:50px; }
+</style>
+</head>
+<body>
+
+<h1>🃏 Texas Hold'em Online</h1>
+
+<h2 id="status">Conectando...</h2>
+<h3 id="countdown"></h3>
+
+<h2>Cartas Comunitarias</h2>
+<div id="community"></div>
+
+<h2>Tu Mano</h2>
+<div id="player"></div>
+
+<h2 id="result"></h2>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+
+socket.on("players", count => {
+    if (count < 2) {
+        document.getElementById("status").innerText = 
+        "Esperando jugador...";
+    } else {
+        document.getElementById("status").innerText = 
+        "Jugador encontrado!";
+    }
+});
+
+socket.on("countdown", sec => {
+    document.getElementById("countdown").innerText = 
+    "La partida empieza en: " + sec;
+});
+
+socket.on("gameData", data => {
+
+    document.getElementById("countdown").innerText = "";
+    document.getElementById("status").innerText = "¡Partida iniciada!";
+
+    const communityDiv = document.getElementById("community");
+    communityDiv.innerHTML = "";
+    data.community.forEach(card => {
+        communityDiv.innerHTML += `<div class="card">${card}</div>`;
+    });
+
+    const playerDiv = document.getElementById("player");
+    playerDiv.innerHTML = "";
+    data.playerCards.forEach(card => {
+        playerDiv.innerHTML += `<div class="card">${card}</div>`;
+    });
+
+    document.getElementById("result").innerText = 
+    "Tenés: " + data.hand;
+});
+</script>
+
+</body>
+</html>
