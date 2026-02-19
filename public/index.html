@@ -9,66 +9,122 @@
 
 body{
   margin:0;
-  background:#0e1a2b;
-  font-family:Arial;
+  background:#0b1522;
+  font-family:Arial, Helvetica, sans-serif;
   color:white;
   text-align:center;
 }
 
-h1{ margin:15px; }
-
-#table{
-  width:850px;
-  height:500px;
-  margin:20px auto;
-  background:radial-gradient(circle at center,#1e7d3c 0%,#115c2c 70%);
-  border-radius:250px;
-  position:relative;
-  border:12px solid #5a3e1b;
+h1{
+  margin:15px;
 }
 
-.seat{
-  width:160px;
-  height:150px;
-  background:#1c1c1c;
-  border-radius:12px;
-  position:absolute;
-  padding:5px;
-  font-size:14px;
+#pot{
+  font-size:22px;
+  margin-top:5px;
 }
 
-.turn{
-  border:3px solid gold;
-}
-
-.role{
-  font-size:12px;
+#winnerText{
+  height:30px;
+  margin-top:10px;
+  font-size:20px;
   color:gold;
 }
 
-.betAmount{
-  font-size:13px;
-  color:#00ff99;
+#table{
+  width:900px;
+  height:520px;
+  margin:20px auto;
+  background:radial-gradient(circle at center,#1f7a3d 0%,#125b2b 70%);
+  border-radius:300px;
+  position:relative;
+  border:14px solid #5a3e1b;
+  box-shadow:0 0 40px rgba(0,0,0,0.6);
 }
+
+/* ASIENTOS */
+
+.seat{
+  width:170px;
+  height:150px;
+  background:#1b1b1b;
+  border-radius:14px;
+  position:absolute;
+  padding:8px;
+  font-size:14px;
+  box-shadow:0 0 10px rgba(0,0,0,0.7);
+}
+
+.turn{
+  box-shadow:0 0 15px gold;
+}
+
+/* ROLES */
+
+.role{
+  position:absolute;
+  top:-10px;
+  right:-10px;
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  font-size:13px;
+  line-height:28px;
+  font-weight:bold;
+  color:black;
+}
+
+.dealer{ background:gold; }
+.sb{ background:#3fa9f5; color:white; }
+.bb{ background:#ff4d4d; color:white; }
+
+/* CARTAS */
 
 .card{
   display:inline-block;
-  width:55px;
-  height:80px;
+  width:65px;
+  height:95px;
   background:white;
-  border-radius:8px;
-  margin:3px;
+  border-radius:10px;
+  margin:4px;
+  position:relative;
+  border:1px solid #aaa;
+  box-shadow:0 3px 6px rgba(0,0,0,0.4);
   font-weight:bold;
-  font-size:20px;
-  line-height:80px;
 }
 
-.red{ color:red; }
-.black{ color:black; }
+.card .top{
+  position:absolute;
+  top:5px;
+  left:6px;
+  font-size:15px;
+}
+
+.card .bottom{
+  position:absolute;
+  bottom:5px;
+  right:6px;
+  font-size:15px;
+  transform:rotate(180deg);
+}
+
+.card .center{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  font-size:28px;
+}
+
+.red{ color:#d60000; }
+.black{ color:#000; }
 
 .hidden{
-  background:#222;
+  background:linear-gradient(45deg,#1e3c72,#2a5298);
+  border:1px solid #222;
 }
+
+/* COMUNITARIAS */
 
 #community{
   position:absolute;
@@ -77,29 +133,34 @@ h1{ margin:15px; }
   transform:translate(-50%,-50%);
 }
 
-#pot{
-  font-size:22px;
-  margin-top:10px;
-}
+/* CONTROLES */
 
-#winnerText{
-  margin-top:10px;
-  font-size:20px;
-  color:gold;
-  min-height:30px;
+#controls{
+  margin-top:15px;
 }
 
 button{
-  padding:8px 15px;
-  margin:5px;
+  padding:10px 18px;
+  margin:6px;
   font-size:15px;
   cursor:pointer;
-  border-radius:6px;
+  border-radius:8px;
   border:none;
+  background:#444;
+  color:white;
+  transition:0.2s;
 }
 
-#controls{
-  margin-top:20px;
+button:hover{
+  background:#666;
+}
+
+button.primary{
+  background:#3fa9f5;
+}
+
+button.danger{
+  background:#ff4d4d;
 }
 
 </style>
@@ -109,50 +170,46 @@ button{
 <h1>♠ Texas Hold'em ♣</h1>
 
 <div id="pot">Pozo: $0</div>
+<div id="winnerText"></div>
 
 <div id="table">
   <div id="community"></div>
 </div>
 
-<div id="winnerText"></div>
-
 <div id="controls">
-  <button id="callBtn" onclick="call()">Call</button>
-  <button id="checkBtn" onclick="check()">Check</button>
-  <button onclick="fold()">Fold</button>
+  <button onclick="check()">Check</button>
+  <button class="primary" onclick="bet(5)">Min ($5)</button>
+  <button class="primary" onclick="bet(10)">Max ($10)</button>
+  <button class="danger" onclick="fold()">Fold</button>
 </div>
 
 <script>
 
 const socket = io();
-
-let myId=null;
-let currentTurn=null;
-let revealCards=false;
-let currentBet=0;
-let myBet=0;
+let myId = null;
+let currentTurn = null;
+let revealCards = false;
 
 socket.on("connect",()=>{
-  myId=socket.id;
+  myId = socket.id;
 });
 
 socket.on("update",data=>{
 
-  currentTurn=data.gameState.turn;
-  revealCards=data.gameState.reveal;
-  currentBet=data.gameState.currentBet;
+  currentTurn = data.gameState.turn;
+  revealCards = data.gameState.reveal;
 
-  document.getElementById("pot").innerText=
-    "Pozo: $"+data.gameState.pot;
+  document.getElementById("pot").innerText =
+    "Pozo: $" + data.gameState.pot;
 
   renderCommunity(data.gameState.community);
-  renderPlayers(data.players);
-  updateControls(data.players);
+  renderPlayers(data.players,data.gameState);
 });
 
 socket.on("showdown",data=>{
-  document.getElementById("winnerText").innerText=
-    "Ganador: "+getPlayerName(data.winner)+" con "+data.description;
+  document.getElementById("winnerText").innerText =
+    "Ganador: " + getPlayerName(data.winner) +
+    " con " + data.description;
 });
 
 function getPlayerName(id){
@@ -166,25 +223,26 @@ function getPlayerName(id){
 function renderCommunity(cards){
   const div=document.getElementById("community");
   div.innerHTML="";
-  cards.forEach(c=>{
-    div.appendChild(createCard(c));
-  });
+  cards.forEach(c=>div.appendChild(createCard(c)));
 }
 
 function createCard(text){
-  const div=document.createElement("div");
-  div.className="card";
   const suit=text.slice(-1);
   const value=text.slice(0,-1);
-  if(suit==="♥"||suit==="♦")
-    div.classList.add("red");
-  else
-    div.classList.add("black");
-  div.innerText=value+suit;
+  const color=(suit==="♥"||suit==="♦")?"red":"black";
+
+  const div=document.createElement("div");
+  div.className="card "+color;
+
+  div.innerHTML=`
+    <div class="top">${value}${suit}</div>
+    <div class="center">${suit}</div>
+    <div class="bottom">${value}${suit}</div>
+  `;
   return div;
 }
 
-function renderPlayers(players){
+function renderPlayers(players,gameState){
 
   document.querySelectorAll(".seat").forEach(e=>e.remove());
 
@@ -209,73 +267,39 @@ function renderPlayers(players){
     if(p.id===currentTurn)
       seat.classList.add("turn");
 
-    if(p.id===myId)
-      myBet=p.bet;
+    /* ROLES */
+    if(index===gameState.dealerIndex){
+      seat.innerHTML+=`<div class="role dealer">D</div>`;
+    }
+    if(index===gameState.sbIndex){
+      seat.innerHTML+=`<div class="role sb">SB</div>`;
+    }
+    if(index===gameState.bbIndex){
+      seat.innerHTML+=`<div class="role bb">BB</div>`;
+    }
 
-    let cardsHtml="";
+    seat.innerHTML+=`<div><b>${p.name}</b></div>`;
+    seat.innerHTML+=`<div>$${p.money}</div>`;
 
     if(p.id===myId || revealCards){
-      p.cards.forEach(c=>{
-        cardsHtml+=createCardHTML(c);
-      });
+      p.cards.forEach(c=>seat.appendChild(createCard(c)));
     }else if(!p.folded){
-      cardsHtml+=`
+      seat.innerHTML+=`
         <div class="card hidden"></div>
         <div class="card hidden"></div>
       `;
     }
 
-    seat.innerHTML=`
-      <div><b>${p.name}</b></div>
-      <div>$${p.money}</div>
-      <div class="role">${p.role || ""}</div>
-      <div class="betAmount">Apuesta: $${p.bet}</div>
-      ${cardsHtml}
-    `;
-
     document.getElementById("table").appendChild(seat);
   });
 }
 
-function createCardHTML(c){
-  const suit=c.slice(-1);
-  const value=c.slice(0,-1);
-  const color=(suit==="♥"||suit==="♦")?"red":"black";
-  return `<div class="card ${color}">${value}${suit}</div>`;
-}
-
-function updateControls(players){
-
-  const callBtn=document.getElementById("callBtn");
-  const checkBtn=document.getElementById("checkBtn");
-
-  const myPlayer=players.find(p=>p.id===myId);
-  if(!myPlayer) return;
-
-  const toCall=currentBet - myPlayer.bet;
-
-  if(currentTurn!==myId){
-    callBtn.disabled=true;
-    checkBtn.disabled=true;
-    return;
-  }
-
-  if(toCall>0){
-    callBtn.innerText="Call $"+toCall;
-    callBtn.disabled=false;
-    checkBtn.disabled=true;
-  }else{
-    callBtn.disabled=true;
-    checkBtn.disabled=false;
-  }
-}
-
-function call(){
-  socket.emit("call");
+function bet(amount){
+  socket.emit("bet",amount);
 }
 
 function check(){
-  socket.emit("check");
+  socket.emit("bet",0);
 }
 
 function fold(){
